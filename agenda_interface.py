@@ -1,8 +1,9 @@
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, simpledialog
 import json
 import os
 from datetime import datetime
+from tkcalendar import Calendar
 
 ARQUIVO_AGENDA = "agenda.json"
 
@@ -17,7 +18,7 @@ SERVICOS = {
     "Outro": 30,
 }
 
-# ---------- LÓGICA DA AGENDA (MESMA IDEIA DO CONSOLE) ----------
+# ---------- LÓGICA DA AGENDA ----------
 
 def carregar_agenda():
     if not os.path.exists(ARQUIVO_AGENDA):
@@ -71,13 +72,33 @@ def iso_para_br(data_iso):
     except ValueError:
         return data_iso
 
+# Lista com os dias da semana em português
+DIAS_SEMANA = [
+    "Segunda-feira",
+    "Terça-feira",
+    "Quarta-feira",
+    "Quinta-feira",
+    "Sexta-feira",
+    "Sábado",
+    "Domingo",
+]
+
+def dia_semana_br(data_iso):
+    """Recebe 'AAAA-MM-DD' e retorna o nome do dia da semana em português."""
+    try:
+        dt = datetime.strptime(data_iso, "%Y-%m-%d")
+        indice = dt.weekday()  # 0 = Segunda, 6 = Domingo
+        return DIAS_SEMANA[indice]
+    except ValueError:
+        return ""
+
 # ---------- INTERFACE GRÁFICA ----------
 
 agenda = carregar_agenda()
 
 root = tk.Tk()
 root.title("Agenda - Barbearia Cavalheiros")
-root.geometry("480x420")
+root.geometry("480x440")
 
 # ---------- TOPO: DATA ----------
 
@@ -88,34 +109,22 @@ tk.Label(frame_data, text="Data (DD/MM/AAAA): ").pack(side=tk.LEFT)
 
 data_var = tk.StringVar()
 
-def set_data_hoje():
-    hoje = datetime.now().strftime("%d/%m/%Y")
-    data_var.set(hoje)
-
-data_entry = tk.Entry(frame_data, textvariable=data_var, width=12, justify="center")
-data_entry.pack(side=tk.LEFT, padx=5)
-
-btn_hoje = tk.Button(frame_data, text="Hoje", command=set_data_hoje)
-btn_hoje.pack(side=tk.LEFT)
-
-set_data_hoje()  # já começa com hoje preenchido
-
-# ---------- LISTA DA AGENDA DO DIA ----------
-
-frame_lista = tk.Frame(root)
-frame_lista.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-label_dia = tk.Label(frame_lista, text="", font=("Arial", 12, "bold"))
-label_dia.pack(pady=5)
-
-lista_horarios = tk.Listbox(frame_lista, height=12, width=60)
-lista_horarios.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-scroll = tk.Scrollbar(frame_lista, command=lista_horarios.yview)
-scroll.pack(side=tk.RIGHT, fill=tk.Y)
-lista_horarios.config(yscrollcommand=scroll.set)
+def atualizar_dia_semana():
+    """Atualiza o label com o dia da semana baseado em data_var."""
+    data_str = data_var.get().strip()
+    data_iso = str_data_para_iso(data_str)
+    if not data_iso:
+        dia_semana_var.set("")
+        return
+    nome = dia_semana_br(data_iso)
+    if nome:
+        dia_semana_var.set(f"Dia da semana: {nome}")
+    else:
+        dia_semana_var.set("")
 
 def atualizar_lista_agenda():
+    atualizar_dia_semana()
+
     data_str = data_var.get().strip()
     data_iso = str_data_para_iso(data_str)
     if not data_iso:
@@ -136,6 +145,81 @@ def atualizar_lista_agenda():
             texto = f"{h} - {slot['cliente']} ({slot['servico']})"
         lista_horarios.insert(tk.END, texto)
 
+def set_data_hoje():
+    hoje = datetime.now().strftime("%d/%m/%Y")
+    data_var.set(hoje)
+    atualizar_lista_agenda()
+
+def abrir_calendario():
+    # Garante que a janela principal sabe seu tamanho/posição atual
+    root.update_idletasks()
+
+    # Pega posição e tamanho da janela principal
+    root_x = root.winfo_rootx()
+    root_y = root.winfo_rooty()
+    root_w = root.winfo_width()
+
+    # Cria a janela do calendário
+    win = tk.Toplevel(root)
+    win.title("Selecionar Data")
+
+    # Define tamanho da janelinha do calendário
+    largura = 300
+    altura = 300
+
+    # Calcula posição: à direita da janela principal, com um espacinho de 10px
+    x = root_x + root_w + 10
+    y = root_y
+
+    # Aplica tamanho + posição (largura x altura + x + y)
+    win.geometry(f"{largura}x{altura}+{x}+{y}")
+
+    # Cria o calendário dentro da janelinha
+    cal = Calendar(
+        win,
+        selectmode="day",
+        date_pattern="dd/mm/yyyy"
+    )
+    cal.pack(pady=10)
+
+    # Função chamada quando clicar em "Confirmar"
+    def confirmar_data():
+        data_escolhida = cal.get_date()   # pega a data
+        data_var.set(data_escolhida)      # coloca no campo de data
+        atualizar_lista_agenda()          # atualiza a agenda do dia
+        win.destroy()                     # fecha a janela do calendário
+
+    tk.Button(win, text="Confirmar", command=confirmar_data).pack(pady=10)
+
+data_entry = tk.Entry(frame_data, textvariable=data_var, width=12, justify="center")
+data_entry.pack(side=tk.LEFT, padx=5)
+
+btn_hoje = tk.Button(frame_data, text="Hoje", command=set_data_hoje)
+btn_hoje.pack(side=tk.LEFT)
+
+btn_calendario = tk.Button(frame_data, text="📅", command=abrir_calendario)
+btn_calendario.pack(side=tk.LEFT, padx=5)
+
+# Label para mostrar o dia da semana
+dia_semana_var = tk.StringVar()
+label_dia_semana = tk.Label(root, textvariable=dia_semana_var, font=("Arial", 10))
+label_dia_semana.pack()
+
+# ---------- LISTA DA AGENDA DO DIA ----------
+
+frame_lista = tk.Frame(root)
+frame_lista.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+label_dia = tk.Label(frame_lista, text="", font=("Arial", 12, "bold"))
+label_dia.pack(pady=5)
+
+lista_horarios = tk.Listbox(frame_lista, height=12, width=60)
+lista_horarios.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+scroll = tk.Scrollbar(frame_lista, command=lista_horarios.yview)
+scroll.pack(side=tk.RIGHT, fill=tk.Y)
+lista_horarios.config(yscrollcommand=scroll.set)
+
 # ---------- FUNÇÕES DE AGENDAR E CANCELAR ----------
 
 def janela_agendar():
@@ -149,7 +233,7 @@ def janela_agendar():
 
     win = tk.Toplevel(root)
     win.title("Novo agendamento")
-    win.geometry("350x320")
+    win.geometry("380x380")
 
     tk.Label(win, text=f"Data: {iso_para_br(data_iso)}").pack(pady=5)
 
@@ -167,7 +251,9 @@ def janela_agendar():
     # Horário
     tk.Label(win, text="Horário inicial:").pack(pady=(10, 0))
     horario_var = tk.StringVar(value=HORARIOS[0])
-    combo_horario = ttk.Combobox(win, textvariable=horario_var, values=HORARIOS, state="readonly")
+    combo_horario = ttk.Combobox(
+        win, textvariable=horario_var, values=HORARIOS, state="readonly"
+    )
     combo_horario.pack(pady=5)
 
     # Observações
@@ -225,8 +311,8 @@ def janela_agendar():
         messagebox.showinfo("Sucesso", "Agendamento realizado com sucesso!")
         win.destroy()
 
-    # 🔹 AGORA SIM: botão vem DEPOIS da função
-    tk.Button(win, text="✅ Salvar agendamento", command=salvar_agendamento).pack(pady=15)
+    tk.Button(win, text="✅ Salvar agendamento",
+              command=salvar_agendamento).pack(pady=15)
 
 
 def cancelar_horario():
@@ -245,7 +331,9 @@ def cancelar_horario():
         hora = linha.split(" - ")[0]
     else:
         # Se nada selecionado, pergunta
-        hora = tk.simpledialog.askstring("Cancelar horário", "Digite o horário (ex: 09:00):")
+        hora = simpledialog.askstring(
+            "Cancelar horário", "Digite o horário (ex: 09:00):"
+        )
         if not hora:
             return
 
@@ -283,16 +371,31 @@ def cancelar_horario():
 frame_botoes = tk.Frame(root)
 frame_botoes.pack(pady=10)
 
-btn_ver = tk.Button(frame_botoes, text="📅 Ver agenda do dia", width=20, command=atualizar_lista_agenda)
+btn_ver = tk.Button(
+    frame_botoes,
+    text="📅 Ver agenda do dia",
+    width=20,
+    command=atualizar_lista_agenda
+)
 btn_ver.grid(row=0, column=0, padx=5, pady=5)
 
-btn_novo = tk.Button(frame_botoes, text="➕ Novo agendamento", width=20, command=janela_agendar)
+btn_novo = tk.Button(
+    frame_botoes,
+    text="➕ Novo agendamento",
+    width=20,
+    command=janela_agendar
+)
 btn_novo.grid(row=0, column=1, padx=5, pady=5)
 
-btn_cancelar = tk.Button(frame_botoes, text="❌ Cancelar horário", width=20, command=cancelar_horario)
+btn_cancelar = tk.Button(
+    frame_botoes,
+    text="❌ Cancelar horário",
+    width=20,
+    command=cancelar_horario
+)
 btn_cancelar.grid(row=1, column=0, columnspan=2, pady=5)
 
-# Carrega a agenda do dia atual ao abrir
-atualizar_lista_agenda()
+# Define data inicial e atualiza a agenda
+set_data_hoje()
 
 root.mainloop()
