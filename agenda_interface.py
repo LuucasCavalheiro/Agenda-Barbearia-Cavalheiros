@@ -19,7 +19,6 @@ SERVICOS = {
     "Outro": 30,
 }
 
-# Lista com os dias da semana em português
 DIAS_SEMANA = [
     "Segunda-feira",
     "Terça-feira",
@@ -45,7 +44,7 @@ def salvar_agenda(agenda):
     with open(ARQUIVO_AGENDA, "w", encoding="utf-8") as f:
         json.dump(agenda, f, ensure_ascii=False, indent=2)
 
-        # ---------- CLIENTES (ANIVERSÁRIOS) ----------
+# ---------- CLIENTES (ANIVERSÁRIOS) ----------
 
 def carregar_clientes():
     if not os.path.exists(ARQUIVO_CLIENTES):
@@ -59,7 +58,6 @@ def carregar_clientes():
 def salvar_clientes(clientes):
     with open(ARQUIVO_CLIENTES, "w", encoding="utf-8") as f:
         json.dump(clientes, f, ensure_ascii=False, indent=2)
-
 
 def gerar_horarios():
     horarios = []
@@ -109,16 +107,18 @@ def dia_semana_br(data_iso):
     except ValueError:
         return ""
 
-# ---------- INTERFACE GRÁFICA ----------
+# ---------- CARREGA DADOS ----------
 
 agenda = carregar_agenda()
 clientes = carregar_clientes()
+
+# ---------- INTERFACE GRÁFICA ----------
 
 root = tk.Tk()
 root.title("Agenda - Barbearia Cavalheiros")
 root.geometry("520x480")
 
-# ---------- TOPO: DATA ----------
+# ----- TOPO: DATA + BOTÕES -----
 
 frame_data = tk.Frame(root)
 frame_data.pack(pady=10)
@@ -127,39 +127,29 @@ tk.Label(frame_data, text="Data (DD/MM/AAAA): ").pack(side=tk.LEFT)
 
 data_var = tk.StringVar()
 
-def atualizar_dia_semana_label(data_iso):
-    """Atualiza o texto do label de dia da semana."""
-    if not data_iso:
-        dia_semana_var.set("")
-        return
-    nome = dia_semana_br(data_iso)
-    if nome:
-        dia_semana_var.set(f"Dia da semana: {nome}")
-    else:
-        dia_semana_var.set("")
-
-def set_data_hoje():
-    hoje_str = datetime.now().strftime("%d/%m/%Y")
-    data_var.set(hoje_str)
+def atualizar_campos_de_data():
+    """Atualiza agenda, dia da semana e aviso de aniversário."""
     atualizar_lista_agenda()
 
+def set_data_hoje():
+    hoje = datetime.now().strftime("%d/%m/%Y")
+    data_var.set(hoje)
+    atualizar_campos_de_data()
+
 def abrir_calendario():
-    # Garante que a janela principal sabe tamanho/posição atuais
+    # Garante posição/tamanho atual da janela principal
     root.update_idletasks()
 
-    # Pega posição e tamanho da janela principal
     root_x = root.winfo_rootx()
     root_y = root.winfo_rooty()
     root_w = root.winfo_width()
 
-    # Cria a janela do calendário
     win = tk.Toplevel(root)
     win.title("Selecionar Data")
 
     largura = 300
     altura = 300
 
-    # Calcula posição: à direita da janela principal, com espacinho de 10px
     x = root_x + root_w + 10
     y = root_y
 
@@ -173,9 +163,9 @@ def abrir_calendario():
     cal.pack(pady=10)
 
     def confirmar_data():
-        data_escolhida = cal.get_date()   # DD/MM/AAAA
+        data_escolhida = cal.get_date()
         data_var.set(data_escolhida)
-        atualizar_lista_agenda()
+        atualizar_campos_de_data()
         win.destroy()
 
     tk.Button(win, text="Confirmar", command=confirmar_data).pack(pady=10)
@@ -189,53 +179,17 @@ btn_hoje.pack(side=tk.LEFT)
 btn_calendario = tk.Button(frame_data, text="📅", command=abrir_calendario)
 btn_calendario.pack(side=tk.LEFT, padx=5)
 
-# Label para mostrar o dia da semana
+# ----- DIA DA SEMANA + AVISO DE ANIVERSÁRIO -----
+
 dia_semana_var = tk.StringVar()
 label_dia_semana = tk.Label(root, textvariable=dia_semana_var, font=("Arial", 10))
 label_dia_semana.pack()
 
-# Label para aviso de aniversário
-aviso_aniversario_var = tk.StringVar()
-label_aviso_aniversario = tk.Label(
-    root,
-    textvariable=aviso_aniversario_var,
-    font=("Arial", 10),
-    fg="purple"
-)
-label_aviso_aniversario.pack()
+aviso_aniver_var = tk.StringVar()
+label_aniver = tk.Label(root, textvariable=aviso_aniver_var, font=("Arial", 9), fg="purple")
+label_aniver.pack(pady=(0, 5))
 
-# ---------- LISTA DA AGENDA DO DIA ----------
-def mostrar_detalhes_agendamento(event):
-    # pega a linha selecionada na lista
-    selecao = lista_horarios.curselection()
-    if not selecao:
-        return
-
-    linha = lista_horarios.get(selecao[0])
-    hora = linha.split(" - ")[0]
-
-    data_str = data_var.get().strip()
-    data_iso = str_data_para_iso(data_str)
-    if not data_iso:
-        return
-
-    # pega o slot da agenda (pode ser None ou com dados)
-    dia = agenda.get(data_iso, {})
-    slot = dia.get(hora)
-
-    if slot is None:
-        messagebox.showinfo("Detalhes", f"{hora} - LIVRE")
-    else:
-        texto = (
-            f"Horário: {hora}\n"
-            f"Cliente: {slot['cliente']}\n"
-            f"Serviço: {slot['servico']}"
-        )
-        obs = slot.get("obs")
-        if obs:
-            texto += f"\nObservações: {obs}"
-
-        messagebox.showinfo("Detalhes do agendamento", texto)
+# ----- LISTA DA AGENDA DO DIA -----
 
 frame_lista = tk.Frame(root)
 frame_lista.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -249,52 +203,49 @@ lista_horarios.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 scroll = tk.Scrollbar(frame_lista, command=lista_horarios.yview)
 scroll.pack(side=tk.RIGHT, fill=tk.Y)
 lista_horarios.config(yscrollcommand=scroll.set)
-lista_horarios.bind("<Double-Button-1>", mostrar_detalhes_agendamento)
 
-def mostrar_detalhes_horario(event):
-    # Pega a data atual da tela
+# ----- FUNÇÕES DE ATUALIZAÇÃO DA TELA -----
+
+def atualizar_dia_semana():
     data_str = data_var.get().strip()
     data_iso = str_data_para_iso(data_str)
     if not data_iso:
-        return  # se a data estiver inválida, não faz nada
+        dia_semana_var.set("")
+        return
+    nome_dia = dia_semana_br(data_iso)
+    if nome_dia:
+        dia_semana_var.set(f"Dia da semana: {nome_dia}")
+    else:
+        dia_semana_var.set("")
 
-    # Pega a linha selecionada na lista
-    selecao = lista_horarios.curselection()
-    if not selecao:
+def atualizar_aviso_aniversario():
+    """Mostra aviso se o dia selecionado for aniversário de alguém."""
+    data_str = data_var.get().strip()
+    try:
+        dt = datetime.strptime(data_str, "%d/%m/%Y")
+    except ValueError:
+        aviso_aniver_var.set("")
         return
 
-    linha = lista_horarios.get(selecao[0])
-    hora = linha.split(" - ")[0]  # pega só a parte "HH:MM"
+    dia_mes = dt.strftime("%d/%m")
+    aniversariantes = []
+    for nome, info in clientes.items():
+        nasc = info.get("nasc")  # formato 'DD/MM'
+        if nasc == dia_mes:
+            tel = info.get("tel")
+            if tel:
+                aniversariantes.append(f"{nome} ({tel})")
+            else:
+                aniversariantes.append(nome)
 
-    # Garante que o dia existe na agenda
-    if data_iso not in agenda:
-        return
-
-    slot = agenda[data_iso].get(hora)
-
-    # Se estiver livre, só avisa
-    if not slot:
-        messagebox.showinfo("Horário livre", f"O horário {hora} está livre.")
-        return
-
-    # Monta o texto com os detalhes
-    nome = slot.get("cliente", "")
-    servico = slot.get("servico", "")
-    obs = slot.get("obs", "")
-
-    mensagem = (
-        f"Horário: {hora}\n"
-        f"Cliente: {nome}\n"
-        f"Serviço: {servico}"
-    )
-
-    if obs:
-        mensagem += f"\nObservações: {obs}"
-
-    messagebox.showinfo("Detalhes do agendamento", mensagem)
-
-    lista_horarios.bind("<Double-Button-1>", mostrar_detalhes_horario)
-
+    if aniversariantes:
+        if len(aniversariantes) == 1:
+            texto = f"🎉 Aniversário de {aniversariantes[0]}!"
+        else:
+            texto = "🎉 Aniversários: " + ", ".join(aniversariantes)
+        aviso_aniver_var.set(texto)
+    else:
+        aviso_aniver_var.set("")
 
 def atualizar_lista_agenda():
     data_str = data_var.get().strip()
@@ -306,8 +257,8 @@ def atualizar_lista_agenda():
     garantir_dia_na_agenda(agenda, data_iso)
     salvar_agenda(agenda)
 
-    # Atualiza label de dia da semana
-    atualizar_dia_semana_label(data_iso)
+    atualizar_dia_semana()
+    atualizar_aviso_aniversario()
 
     lista_horarios.delete(0, tk.END)
     label_dia.config(text=f"Agenda do dia {iso_para_br(data_iso)}")
@@ -317,71 +268,10 @@ def atualizar_lista_agenda():
         if slot is None:
             texto = f"{h} - LIVRE"
         else:
-            obs = slot.get("obs", "")
-            # Se tiver observação, mostra também
-            if obs:
-                texto = f"{h} - {slot['cliente']} ({slot['servico']}) - {obs}"
-            else:
-                texto = f"{h} - {slot['cliente']} ({slot['servico']})"
+            texto = f"{h} - {slot['cliente']} ({slot['servico']})"
         lista_horarios.insert(tk.END, texto)
 
-# ---------- FUNÇÕES DE AGENDAR E CANCELAR ----------
-
-def abrir_aniversarios():
-    #Janela de aniversários
-    win = tk.Toplevel(root)
-    win.title("Aniversários dos Clientes")
-    win.geometry("300x400")
-
-    tk.Label(win, text="Aniversariantes do Mês", font=("Arial", 12, "bold")).pack(pady=5)
-
-    #Campo Nome
-    tk.Label(win, text="Nome do cliente:").pack()
-    nome_entry = tk.Entry(win)
-    nome_entry.pack(pady=5)
-    
-    #Campo aniversário (DD/MM)
-    tk.Label(win, text="Aniversário (DD/MM):").pack()
-    data_entry = tk.Entry(win)
-    data_entry.pack(pady=5)
-
-    # Lista de aniversariantes já cadastrados
-    tk.Label(win, text="Clientes cadastrados:", font=("Arial", 10, "bold")).pack(pady=5)
-    lista= tk.Listbox(win, width=40, height=10)
-    lista.pack()
-
-    #preencher lista ao abrir
-    for nome, data in clientes.items():
-        lista.insert(tk.END, f"{nome} - {data}")
-
-    def salvar_cliente():
-        nome = nome_entry.get().strip()
-        data = data_entry.get().strip()
-
-    if not nome or not data:
-        messagebox.showerror("Erro", "Preencha nome e data.")
-        return
-    
-# Validação simples do formato DD/MM
-    if len(data) !=5 or data[2] != "/":
-        messagebox.showerror("Erro", "Data inválida. Use o formato DD/MM.")
-        return
-
-    clientes[nome] = data
-    salvar_clientes(clientes)
-
-    lista.insert(tk.END, f"{nome} - {data}")
-
-    nome_entry.delete(0, tk.END)
-    data.entry.delete(0, tk.END)
-
-    messagebox.showinfo("Sucesso", "Cliente salvo!")
-
-    #Botão salvar
-    tk.Button(win, text ="💾 Salvar Cliente", command=salvar_cliente).pack(pady=10)
-
-
-
+# ----- JANELA DE NOVO AGENDAMENTO -----
 
 def janela_agendar():
     data_str = data_var.get().strip()
@@ -394,7 +284,7 @@ def janela_agendar():
 
     win = tk.Toplevel(root)
     win.title("Novo agendamento")
-    win.geometry("420x420")
+    win.geometry("380x420")
 
     tk.Label(win, text=f"Data: {iso_para_br(data_iso)}").pack(pady=5)
 
@@ -403,10 +293,10 @@ def janela_agendar():
     nome_entry = tk.Entry(win)
     nome_entry.pack(pady=5)
 
-# Telefone
-    tk.Label(win, text="Telefone do cliente (opcional):").pack()
-    telefone_entry = tk.Entry(win)
-    telefone_entry.pack(pady=5)
+    # Telefone
+    tk.Label(win, text="Telefone (opcional):").pack()
+    tel_entry = tk.Entry(win)
+    tel_entry.pack(pady=5)
 
     # Serviço
     tk.Label(win, text="Serviço:").pack()
@@ -428,19 +318,17 @@ def janela_agendar():
     def salvar_agendamento():
         nome = nome_entry.get().strip()
         if not nome:
-            messagebox.showerror("Erro", "Informe o nome do cliente.")
+            messagebox.showerror("Erro", "Informe o nome do cliente.", parent=win)
             return
-        
-        telefone = telefone_entry.get().strip()
 
-
+        telefone = tel_entry.get().strip()
         servico = servico_var.get()
         duracao = SERVICOS[servico]
         hora_inicial = horario_var.get()
         obs = obs_entry.get().strip()
 
         if hora_inicial not in HORARIOS:
-            messagebox.showerror("Erro", "Horário inválido.")
+            messagebox.showerror("Erro", "Horário inválido.", parent=win)
             return
 
         blocos = duracao // INTERVALO
@@ -449,7 +337,8 @@ def janela_agendar():
         if indice + blocos - 1 >= len(HORARIOS):
             messagebox.showerror(
                 "Erro",
-                "Esse serviço não cabe até o fim do expediente nesse horário."
+                "Esse serviço não cabe até o fim do expediente nesse horário.",
+                parent=win
             )
             return
 
@@ -459,28 +348,30 @@ def janela_agendar():
         if any(agenda[data_iso].get(h) is not None for h in blocos_horarios):
             messagebox.showerror(
                 "Erro",
-                "Um ou mais horários desse período já estão ocupados."
+                "Um ou mais horários desse período já estão ocupados.",
+                parent=win
             )
             return
 
-        # Gravar agendamento (mesmo obs para todos os blocos)
+        # Gravar agendamento
         for h in blocos_horarios:
             agenda[data_iso][h] = {
                 "cliente": nome,
-                "telefone": telefone,
                 "servico": servico,
                 "duracao": duracao,
                 "obs": obs,
                 "inicio": hora_inicial,
+                "telefone": telefone,
             }
 
         salvar_agenda(agenda)
         atualizar_lista_agenda()
-        messagebox.showinfo("Sucesso", "Agendamento realizado com sucesso!")
+        messagebox.showinfo("Sucesso", "Agendamento realizado com sucesso!", parent=win)
         win.destroy()
 
     tk.Button(win, text="✅ Salvar agendamento", command=salvar_agendamento).pack(pady=15)
 
+# ----- CANCELAR HORÁRIO -----
 
 def cancelar_horario():
     data_str = data_var.get().strip()
@@ -491,13 +382,11 @@ def cancelar_horario():
 
     garantir_dia_na_agenda(agenda, data_iso)
 
-    # Pede o horário a partir da seleção na lista ou pergunta
     selecao = lista_horarios.curselection()
     if selecao:
         linha = lista_horarios.get(selecao[0])
         hora = linha.split(" - ")[0]
     else:
-        # Se nada selecionado, pergunta
         hora = tk.simpledialog.askstring("Cancelar horário", "Digite o horário (ex: 09:00):")
         if not hora:
             return
@@ -531,7 +420,139 @@ def cancelar_horario():
     atualizar_lista_agenda()
     messagebox.showinfo("Sucesso", "Horário cancelado com sucesso.")
 
-# ---------- BOTÕES INFERIORES ----------
+# ----- DETALHES DO AGENDAMENTO (DUPLO CLIQUE) -----
+
+def ver_detalhes_agendamento(event):
+    data_str = data_var.get().strip()
+    data_iso = str_data_para_iso(data_str)
+    if not data_iso:
+        return
+
+    selecao = lista_horarios.curselection()
+    if not selecao:
+        return
+
+    linha = lista_horarios.get(selecao[0])
+    hora = linha.split(" - ")[0]
+
+    slot = agenda.get(data_iso, {}).get(hora)
+    if not slot:
+        return
+
+    cliente = slot.get("cliente", "")
+    servico = slot.get("servico", "")
+    inicio = slot.get("inicio", hora)
+    duracao = slot.get("duracao", 0)
+    obs = slot.get("obs", "")
+    tel = slot.get("telefone", "")
+
+    fim_idx = HORARIOS.index(inicio) + (duracao // INTERVALO) - 1
+    if 0 <= fim_idx < len(HORARIOS):
+        hora_fim = HORARIOS[fim_idx]
+    else:
+        hora_fim = "?"
+
+    msg = f"Cliente: {cliente}\nServiço: {servico}\nHorário: {inicio} - {hora_fim}\nDuração: {duracao} minutos"
+    if tel:
+        msg += f"\nTelefone: {tel}"
+    if obs:
+        msg += f"\nObservações: {obs}"
+
+    messagebox.showinfo("Detalhes do agendamento", msg)
+
+lista_horarios.bind("<Double-Button-1>", ver_detalhes_agendamento)
+
+# ----- JANELA DE CLIENTES / ANIVERSÁRIOS -----
+
+def abrir_aniversarios():
+    win = tk.Toplevel(root)
+    win.title("Aniversários de clientes")
+    win.geometry("600x400")
+
+    tk.Label(win, text="Clientes cadastrados", font=("Arial", 12, "bold")).pack(pady=5)
+
+    frame_lista_cli = tk.Frame(win)
+    frame_lista_cli.pack(fill=tk.BOTH, expand=True, padx=10)
+
+    lista_cli = tk.Listbox(frame_lista_cli, height=8, width=80)
+    lista_cli.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    scroll_cli = tk.Scrollbar(frame_lista_cli, command=lista_cli.yview)
+    scroll_cli.pack(side=tk.RIGHT, fill=tk.Y)
+    lista_cli.config(yscrollcommand=scroll_cli.set)
+
+    def atualizar_lista_clientes():
+        lista_cli.delete(0, tk.END)
+        for nome, info in clientes.items():
+            nasc = info.get("nasc", "")
+            tel = info.get("tel", "")
+            linha = f"{nome} - Nasc: {nasc}"
+            if tel:
+                linha += f" - Tel: {tel}"
+            lista_cli.insert(tk.END, linha)
+
+    frame_form = tk.Frame(win)
+    frame_form.pack(fill=tk.X, padx=10, pady=10)
+
+    tk.Label(frame_form, text="Nome:").grid(row=0, column=0, sticky="e")
+    entry_nome = tk.Entry(frame_form, width=30)
+    entry_nome.grid(row=0, column=1, padx=5, pady=2, sticky="w")
+
+    tk.Label(frame_form, text="Aniversário (DD/MM):").grid(row=1, column=0, sticky="e")
+    entry_nasc = tk.Entry(frame_form, width=10)
+    entry_nasc.grid(row=1, column=1, padx=5, pady=2, sticky="w")
+
+    tk.Label(frame_form, text="Telefone (opcional):").grid(row=2, column=0, sticky="e")
+    entry_tel = tk.Entry(frame_form, width=20)
+    entry_tel.grid(row=2, column=1, padx=5, pady=2, sticky="w")
+
+    def on_lista_duplo_click(event):
+        idxs = lista_cli.curselection()
+        if not idxs:
+            return
+        linha = lista_cli.get(idxs[0])
+        nome = linha.split(" - ")[0]
+        info = clientes.get(nome, {})
+        entry_nome.delete(0, tk.END)
+        entry_nome.insert(0, nome)
+        entry_nasc.delete(0, tk.END)
+        entry_nasc.insert(0, info.get("nasc", ""))
+        entry_tel.delete(0, tk.END)
+        entry_tel.insert(0, info.get("tel", ""))
+
+    lista_cli.bind("<Double-Button-1>", on_lista_duplo_click)
+
+    def salvar_cliente_cmd():
+        nome = entry_nome.get().strip()
+        nasc = entry_nasc.get().strip()
+        tel = entry_tel.get().strip()
+
+        if not nome or not nasc:
+            messagebox.showerror("Erro", "Preencha pelo menos nome e aniversário (DD/MM).", parent=win)
+            return
+
+        # valida aniversário DD/MM usando ano fictício
+        try:
+            datetime.strptime(nasc + "/2000", "%d/%m/%Y")
+        except ValueError:
+            messagebox.showerror("Erro", "Data de aniversário inválida. Use o formato DD/MM.", parent=win)
+            return
+
+        clientes[nome] = {"nasc": nasc, "tel": tel}
+        salvar_clientes(clientes)
+        atualizar_lista_clientes()
+        atualizar_aviso_aniversario()
+        messagebox.showinfo("Sucesso", "Cliente salvo com sucesso!", parent=win)
+
+        entry_nome.delete(0, tk.END)
+        entry_nasc.delete(0, tk.END)
+        entry_tel.delete(0, tk.END)
+
+    tk.Button(win, text="💾 Salvar cliente", command=salvar_cliente_cmd).pack(pady=5)
+
+    atualizar_lista_clientes()
+
+# ----- BOTÕES INFERIORES -----
 
 frame_botoes = tk.Frame(root)
 frame_botoes.pack(pady=10)
@@ -543,17 +564,13 @@ btn_novo = tk.Button(frame_botoes, text="➕ Novo agendamento", width=20, comman
 btn_novo.grid(row=0, column=1, padx=5, pady=5)
 
 btn_cancelar = tk.Button(frame_botoes, text="❌ Cancelar horário", width=20, command=cancelar_horario)
-btn_cancelar.grid(row=1, column=0, columnspan=2, pady=5)
+btn_cancelar.grid(row=1, column=0, padx=5, pady=5)
 
-btn_aniversarios = tk.Button(
-    frame_botoes,
-    text="🎂 Aniversários",
-    width=20,
-    command=abrir_aniversarios
-)
-btn_aniversarios.grid(row=2, column=0, columnspan=2, pady=5)
+btn_cli = tk.Button(frame_botoes, text="➕ Cadastrar Clientes", width=20, command=abrir_aniversarios)
+btn_cli.grid(row=1, column=1, padx=5, pady=5)
 
-# Define data inicial e carrega agenda
-set_data_hoje()
+# ----- INICIALIZAÇÃO -----
+
+set_data_hoje()  # já chama atualizar_campos_de_data() por dentro
 
 root.mainloop()
