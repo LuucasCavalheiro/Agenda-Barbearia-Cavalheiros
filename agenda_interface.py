@@ -4,9 +4,12 @@ import json
 import os
 from datetime import datetime
 from tkcalendar import Calendar
+import shutil
+from datetime import datetime
 
 ARQUIVO_AGENDA = "agenda.json"
 ARQUIVO_CLIENTES = "clientes.json"
+BACKUP_DIR = "backups"
 
 HORARIO_INICIO = (9, 0)    # 09:00
 HORARIO_FIM = (20, 30)     # 20:30
@@ -43,6 +46,8 @@ def carregar_agenda():
 def salvar_agenda(agenda):
     with open(ARQUIVO_AGENDA, "w", encoding="utf-8") as f:
         json.dump(agenda, f, ensure_ascii=False, indent=2)
+    
+    fazer_backup()
 
 # ---------- CLIENTES (ANIVERSÁRIOS) ----------
 
@@ -58,6 +63,8 @@ def carregar_clientes():
 def salvar_clientes(clientes):
     with open(ARQUIVO_CLIENTES, "w", encoding="utf-8") as f:
         json.dump(clientes, f, ensure_ascii=False, indent=2)
+    
+    fazer_backup()
 
 def gerar_horarios():
     horarios = []
@@ -106,6 +113,21 @@ def dia_semana_br(data_iso):
         return DIAS_SEMANA[indice]
     except ValueError:
         return ""
+
+def fazer_backup():
+    """Cria uma cópia de agenda.json e clientes.json na pasta backups/."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    for arquivo in (ARQUIVO_AGENDA, ARQUIVO_CLIENTES):
+        if os.path.exists(arquivo):
+            nome_base, ext = os.path.splitext(os.path.basename(arquivo))
+            destino = os.path.join(
+                BACKUP_DIR,
+                f"{nome_base}_{timestamp}{ext}"
+            )
+            shutil.copy2(arquivo, destino)
 
 # ---------- CARREGA DADOS ----------
 
