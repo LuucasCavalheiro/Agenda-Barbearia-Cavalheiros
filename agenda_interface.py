@@ -274,6 +274,7 @@ def atualizar_lista_agenda():
 # ----- JANELA DE NOVO AGENDAMENTO -----
 
 def janela_agendar():
+    # Usa a data que está na tela
     data_str = data_var.get().strip()
     data_iso = str_data_para_iso(data_str)
     if not data_iso:
@@ -282,23 +283,125 @@ def janela_agendar():
 
     garantir_dia_na_agenda(agenda, data_iso)
 
+    # Janela do agendamento
     win = tk.Toplevel(root)
     win.title("Novo agendamento")
-    win.geometry("380x420")
+    win.geometry("450x470")
 
     tk.Label(win, text=f"Data: {iso_para_br(data_iso)}").pack(pady=5)
 
-    # Nome
-    tk.Label(win, text="Nome do cliente:").pack()
-    nome_entry = tk.Entry(win)
-    nome_entry.pack(pady=5)
+    # -------------------------------------------
+    # NOME DO CLIENTE (COM COMBOBOX + SUGESTÕES)
+    # -------------------------------------------
+    tk.Label(win, text="Cliente (já cadastrado):").pack()
 
-    # Telefone
-    tk.Label(win, text="Telefone (opcional):").pack()
-    tel_entry = tk.Entry(win)
-    tel_entry.pack(pady=5)
+    nomes_clientes = sorted(clientes.keys())
+    nome_var = tk.StringVar()
 
-    # Serviço
+    combo_nome = ttk.Combobox(
+        win,
+        textvariable=nome_var,
+        values=nomes_clientes,
+        state="normal"  # pode digitar e escolher
+    )
+    combo_nome.pack(pady=5, fill=tk.X, padx=20)
+
+    # label que mostra telefone / aniversário do cliente escolhido
+    info_cli_var = tk.StringVar()
+    label_info_cli = tk.Label(win, textvariable=info_cli_var,
+                              font=("Arial", 9), fg="gray")
+    label_info_cli.pack(pady=(0, 5))
+
+    def atualizar_info_cliente(event=None):
+        """Atualiza label com telefone/aniversário do cliente escolhido."""
+        nome = nome_var.get().strip()
+        info = clientes.get(nome)
+        if not info:
+            info_cli_var.set("")
+            return
+
+        nasc = info.get("nasc", "")
+        tel = info.get("tel", "")
+
+        partes = []
+        if tel:
+            partes.append(f"📞 {tel}")
+        if nasc:
+            partes.append(f"🎂 {nasc}")
+
+        info_cli_var.set("   ".join(partes))
+
+    combo_nome.bind("<<ComboboxSelected>>", atualizar_info_cliente)
+
+    # Listbox de sugestões de nome
+    lista_sugestoes = tk.Listbox(win, height=5)
+    lista_sugestoes.pack(fill=tk.X, padx=20)
+
+    def atualizar_sugestoes():
+        texto = nome_var.get().lower()
+        lista_sugestoes.delete(0, tk.END)
+        if not texto:
+            return
+        for n in nomes_clientes:
+            if texto in n.lower():
+                lista_sugestoes.insert(tk.END, n)
+
+    def escolher_sugestao(event=None):
+        if not lista_sugestoes.curselection():
+            return
+        idx = lista_sugestoes.curselection()[0]
+        nome_escolhido = lista_sugestoes.get(idx)
+        nome_var.set(nome_escolhido)
+        lista_sugestoes.delete(0, tk.END)
+        atualizar_info_cliente()
+        combo_nome.icursor(tk.END)
+        combo_nome.focus()
+
+    lista_sugestoes.bind("<Double-Button-1>", escolher_sugestao)
+
+    def mover_selecao(delta):
+        """Move a seleção da listbox para cima/baixo."""
+        if lista_sugestoes.size() == 0:
+            return
+        current = lista_sugestoes.curselection()
+        if current:
+            idx = current[0] + delta
+        else:
+            idx = 0 if delta > 0 else lista_sugestoes.size() - 1
+        idx = max(0, min(lista_sugestoes.size() - 1, idx))
+        lista_sugestoes.select_clear(0, tk.END)
+        lista_sugestoes.select_set(idx)
+        lista_sugestoes.activate(idx)
+        lista_sugestoes.see(idx)
+
+    def on_key_release(event):
+        # ignora teclas de navegação aqui
+        if event.keysym in ("Up", "Down", "Return"):
+            return
+        atualizar_sugestoes()
+        atualizar_info_cliente()
+
+    def on_down(event):
+        mover_selecao(1)
+        return "break"
+
+    def on_up(event):
+        mover_selecao(-1)
+        return "break"
+
+    def on_enter(event):
+        if lista_sugestoes.size() > 0:
+            escolher_sugestao()
+            return "break"
+
+    combo_nome.bind("<KeyRelease>", on_key_release)
+    combo_nome.bind("<Down>", on_down)
+    combo_nome.bind("<Up>", on_up)
+    combo_nome.bind("<Return>", on_enter)
+
+    # -------------------------------------------
+    # SERVIÇO
+    # -------------------------------------------
     tk.Label(win, text="Serviço:").pack()
     servico_var = tk.StringVar(value="Cabelo")
     for s in SERVICOS.keys():
@@ -307,7 +410,12 @@ def janela_agendar():
     # Horário
     tk.Label(win, text="Horário inicial:").pack(pady=(10, 0))
     horario_var = tk.StringVar(value=HORARIOS[0])
-    combo_horario = ttk.Combobox(win, textvariable=horario_var, values=HORARIOS, state="readonly")
+    combo_horario = ttk.Combobox(
+        win,
+        textvariable=horario_var,
+        values=HORARIOS,
+        state="readonly"
+    )
     combo_horario.pack(pady=5)
 
     # Observações
@@ -315,20 +423,31 @@ def janela_agendar():
     obs_entry = tk.Entry(win)
     obs_entry.pack(pady=5, fill=tk.X, padx=20)
 
+    # -------------------------------------------
+    # SALVAR AGENDAMENTO
+    # -------------------------------------------
     def salvar_agendamento():
-        nome = nome_entry.get().strip()
+        nome = nome_var.get().strip()
+
+        # agora SÓ deixa agendar cliente já cadastrado
         if not nome:
-            messagebox.showerror("Erro", "Informe o nome do cliente.", parent=win)
+            messagebox.showerror("Erro", "Escolha o nome do cliente.")
             return
 
-        telefone = tel_entry.get().strip()
+        if nome not in clientes:
+            messagebox.showerror(
+                "Erro",
+                "Cliente não cadastrado.\nUse o botão 'Cadastrar Clientes' antes de agendar."
+            )
+            return
+
         servico = servico_var.get()
         duracao = SERVICOS[servico]
         hora_inicial = horario_var.get()
         obs = obs_entry.get().strip()
 
         if hora_inicial not in HORARIOS:
-            messagebox.showerror("Erro", "Horário inválido.", parent=win)
+            messagebox.showerror("Erro", "Horário inválido.")
             return
 
         blocos = duracao // INTERVALO
@@ -337,8 +456,7 @@ def janela_agendar():
         if indice + blocos - 1 >= len(HORARIOS):
             messagebox.showerror(
                 "Erro",
-                "Esse serviço não cabe até o fim do expediente nesse horário.",
-                parent=win
+                "Esse serviço não cabe até o fim do expediente nesse horário."
             )
             return
 
@@ -348,8 +466,7 @@ def janela_agendar():
         if any(agenda[data_iso].get(h) is not None for h in blocos_horarios):
             messagebox.showerror(
                 "Erro",
-                "Um ou mais horários desse período já estão ocupados.",
-                parent=win
+                "Um ou mais horários desse período já estão ocupados."
             )
             return
 
@@ -361,12 +478,11 @@ def janela_agendar():
                 "duracao": duracao,
                 "obs": obs,
                 "inicio": hora_inicial,
-                "telefone": telefone,
             }
 
         salvar_agenda(agenda)
         atualizar_lista_agenda()
-        messagebox.showinfo("Sucesso", "Agendamento realizado com sucesso!", parent=win)
+        messagebox.showinfo("Sucesso", "Agendamento realizado com sucesso!")
         win.destroy()
 
     tk.Button(win, text="✅ Salvar agendamento", command=salvar_agendamento).pack(pady=15)
@@ -452,7 +568,12 @@ def ver_detalhes_agendamento(event):
     else:
         hora_fim = "?"
 
-    msg = f"Cliente: {cliente}\nServiço: {servico}\nHorário: {inicio} - {hora_fim}\nDuração: {duracao} minutos"
+    msg = (
+        f"Cliente: {cliente}\n"
+        f"Serviço: {servico}\n"
+        f"Horário: {inicio} - {hora_fim}\n"
+        f"Duração: {duracao} minutos"
+    )
     if tel:
         msg += f"\nTelefone: {tel}"
     if obs:
@@ -528,14 +649,22 @@ def abrir_aniversarios():
         tel = entry_tel.get().strip()
 
         if not nome or not nasc:
-            messagebox.showerror("Erro", "Preencha pelo menos nome e aniversário (DD/MM).", parent=win)
+            messagebox.showerror(
+                "Erro",
+                "Preencha pelo menos nome e aniversário (DD/MM).",
+                parent=win,
+            )
             return
 
         # valida aniversário DD/MM usando ano fictício
         try:
             datetime.strptime(nasc + "/2000", "%d/%m/%Y")
         except ValueError:
-            messagebox.showerror("Erro", "Data de aniversário inválida. Use o formato DD/MM.", parent=win)
+            messagebox.showerror(
+                "Erro",
+                "Data de aniversário inválida. Use o formato DD/MM.",
+                parent=win,
+            )
             return
 
         clientes[nome] = {"nasc": nasc, "tel": tel}
@@ -552,22 +681,121 @@ def abrir_aniversarios():
 
     atualizar_lista_clientes()
 
+# ----- JANELA DE BUSCA POR CLIENTE -----
+
+def janela_buscar_cliente():
+    if not clientes:
+        messagebox.showinfo("Info", "Nenhum cliente cadastrado ainda.")
+        return
+
+    win = tk.Toplevel(root)
+    win.title("Buscar agendamentos por cliente")
+    win.geometry("520x420")
+
+    tk.Label(
+        win,
+        text="Buscar agendamentos por cliente",
+        font=("Arial", 12, "bold"),
+    ).pack(pady=5)
+
+    # seleção do cliente
+    tk.Label(win, text="Cliente:").pack()
+    nomes_clientes = sorted(clientes.keys())
+    nome_var = tk.StringVar()
+    combo_nome = ttk.Combobox(
+        win, textvariable=nome_var, values=nomes_clientes, state="readonly"
+    )
+    combo_nome.pack(pady=5)
+
+    # lista de resultados
+    frame_lista_res = tk.Frame(win)
+    frame_lista_res.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    lista_res = tk.Listbox(frame_lista_res, height=15, width=70)
+    lista_res.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    scroll_res = tk.Scrollbar(frame_lista_res, command=lista_res.yview)
+    scroll_res.pack(side=tk.RIGHT, fill=tk.Y)
+    lista_res.config(yscrollcommand=scroll_res.set)
+
+    def buscar():
+        nome = nome_var.get().strip()
+        lista_res.delete(0, tk.END)
+
+        if not nome:
+            messagebox.showerror("Erro", "Selecione um cliente.", parent=win)
+            return
+
+        resultados = []
+
+        # varre TODA a agenda (todas as datas / horários)
+        for data_iso, dia in agenda.items():
+            for hora, slot in dia.items():
+                if slot and slot.get("cliente") == nome:
+                    resultados.append(
+                        (
+                            data_iso,
+                            hora,
+                            slot.get("servico", ""),
+                            slot.get("obs", ""),
+                        )
+                    )
+
+        if not resultados:
+            lista_res.insert(
+                tk.END,
+                "Nenhum agendamento encontrado para esse cliente.",
+            )
+            return
+
+        # ordena por data + hora
+        resultados.sort(key=lambda t: (t[0], t[1]))
+
+        for data_iso, hora, servico, obs in resultados:
+            data_br = iso_para_br(data_iso)
+            linha = f"{data_br} - {hora} - {servico}"
+            if obs:
+                linha += f" ({obs})"
+            lista_res.insert(tk.END, linha)
+
+    tk.Button(win, text="🔍 Buscar", command=buscar).pack(pady=5)
+
 # ----- BOTÕES INFERIORES -----
 
 frame_botoes = tk.Frame(root)
 frame_botoes.pack(pady=10)
 
-btn_ver = tk.Button(frame_botoes, text="📅 Ver agenda do dia", width=20, command=atualizar_lista_agenda)
+btn_ver = tk.Button(
+    frame_botoes, text="📅 Ver agenda do dia",
+    width=20, command=atualizar_lista_agenda
+)
 btn_ver.grid(row=0, column=0, padx=5, pady=5)
 
-btn_novo = tk.Button(frame_botoes, text="➕ Novo agendamento", width=20, command=janela_agendar)
+btn_novo = tk.Button(
+    frame_botoes, text="➕ Novo agendamento",
+    width=20, command=janela_agendar
+)
 btn_novo.grid(row=0, column=1, padx=5, pady=5)
 
-btn_cancelar = tk.Button(frame_botoes, text="❌ Cancelar horário", width=20, command=cancelar_horario)
+btn_cancelar = tk.Button(
+    frame_botoes, text="❌ Cancelar horário",
+    width=20, command=cancelar_horario
+)
 btn_cancelar.grid(row=1, column=0, padx=5, pady=5)
 
-btn_cli = tk.Button(frame_botoes, text="➕ Cadastrar Clientes", width=20, command=abrir_aniversarios)
+btn_cli = tk.Button(
+    frame_botoes, text="➕ Cadastrar Clientes",
+    width=20, command=abrir_aniversarios
+)
 btn_cli.grid(row=1, column=1, padx=5, pady=5)
+
+btn_buscar = tk.Button(
+    frame_botoes,
+    text="🔍 Buscar cliente",
+    width=20,
+    command=janela_buscar_cliente,
+)
+btn_buscar.grid(row=2, column=0, columnspan=2, pady=5)
 
 # ----- INICIALIZAÇÃO -----
 
