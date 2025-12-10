@@ -1,5 +1,5 @@
-import tkinter as tk
-from tkinter import messagebox, ttk
+import tkinter as tk 
+from tkinter import messagebox, ttk, simpledialog
 import json
 import os
 from datetime import datetime
@@ -47,7 +47,10 @@ def salvar_agenda(agenda):
     with open(ARQUIVO_AGENDA, "w", encoding="utf-8") as f:
         json.dump(agenda, f, ensure_ascii=False, indent=2)
     
-    fazer_backup()
+    # Salva o backup
+    backup = "agenda_backup.json"
+    with open(backup, "w", encoding="utf-8") as f:
+        json.dump(agenda, f, ensure_ascii=False, indent=2)
 
 # ---------- CLIENTES (ANIVERSÁRIOS) ----------
 
@@ -113,7 +116,7 @@ def dia_semana_br(data_iso):
         return DIAS_SEMANA[indice]
     except ValueError:
         return ""
-
+    
 def fazer_backup():
     """Cria uma cópia de agenda.json e clientes.json na pasta backups/."""
     os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -525,7 +528,7 @@ def cancelar_horario():
         linha = lista_horarios.get(selecao[0])
         hora = linha.split(" - ")[0]
     else:
-        hora = tk.simpledialog.askstring("Cancelar horário", "Digite o horário (ex: 09:00):")
+        hora = simpledialog.askstring("Cancelar horário", "Digite o horário (ex: 09:00):")
         if not hora:
             return
 
@@ -557,6 +560,269 @@ def cancelar_horario():
     salvar_agenda(agenda)
     atualizar_lista_agenda()
     messagebox.showinfo("Sucesso", "Horário cancelado com sucesso.")
+
+# ----- EDITAR AGENDAMENTO (AGORA PODE MUDAR DE DIA E TROCAR) -----
+
+def janela_editar_agendamento():
+    """Abre uma tela para editar o agendamento selecionado (qualquer dia)."""
+    # 1) Pega a data atual da tela (data original)
+    data_str = data_var.get().strip()
+    data_iso = str_data_para_iso(data_str)
+    if not data_iso:
+        messagebox.showerror("Erro", "Data inválida. Use o formato DD/MM/AAAA.")
+        return
+
+    # 2) Verifica se algum horário foi selecionado na lista
+    selecao = lista_horarios.curselection()
+    if not selecao:
+        messagebox.showinfo("Info", "Selecione um horário na lista para editar.")
+        return
+
+    # 3) Descobre qual horário foi clicado
+    linha = lista_horarios.get(selecao[0])
+    hora = linha.split(" - ")[0]
+
+    # 4) Pega o slot desse horário na agenda
+    slot = agenda.get(data_iso, {}).get(hora)
+    if not slot:
+        messagebox.showinfo("Info", "Esse horário está livre, não há o que editar.")
+        return
+
+    # Dados originais
+    cliente = slot.get("cliente", "")
+    servico = slot.get("servico", "")
+    obs = slot.get("obs", "")
+    inicio = slot.get("inicio", hora)
+    duracao_original = slot.get("duracao", SERVICOS.get(servico, 30))
+    data_original_iso = data_iso
+
+    # ---------------------------
+    # JANELA DE EDIÇÃO
+    # ---------------------------
+    edit = tk.Toplevel(root)
+    edit.title("Editar agendamento")
+    edit.geometry("380x420")
+
+    tk.Label(edit, text=f"Cliente: {cliente}", font=("Arial", 11, "bold")).pack(pady=5)
+
+    # DATA DO AGENDAMENTO (COM BOTÃO PARA MUDAR)
+    tk.Label(edit, text="Data do agendamento:").pack()
+    data_destino_iso_var = tk.StringVar(value=data_original_iso)
+    data_destino_br_var = tk.StringVar(value=iso_para_br(data_original_iso))
+    label_data_dest = tk.Label(edit, textvariable=data_destino_br_var, font=("Arial", 10))
+    label_data_dest.pack(pady=(0, 5))
+
+    def escolher_nova_data():
+        win_data = tk.Toplevel(edit)
+        win_data.title("Selecionar nova data")
+        win_data.geometry("280x280")
+
+        cal = Calendar(
+            win_data,
+            selectmode="day",
+            date_pattern="dd/mm/yyyy"
+        )
+        cal.pack(pady=10)
+
+        def confirmar_data():
+            data_escolhida_br = cal.get_date()  # dd/mm/yyyy
+            data_escolhida_iso = str_data_para_iso(data_escolhida_br)
+            if not data_escolhida_iso:
+                messagebox.showerror("Erro", "Data inválida.", parent=win_data)
+                return
+            data_destino_iso_var.set(data_escolhida_iso)
+            data_destino_br_var.set(data_escolhida_br)
+            win_data.destroy()
+
+        tk.Button(win_data, text="Confirmar", command=confirmar_data).pack(pady=10)
+
+    tk.Button(edit, text="Mudar data", command=escolher_nova_data).pack(pady=(0, 10))
+
+    # Serviço
+    tk.Label(edit, text="Serviço:").pack()
+    servico_var = tk.StringVar(value=servico)
+    for s in SERVICOS.keys():
+        tk.Radiobutton(edit, text=s, variable=servico_var, value=s).pack(anchor="w")
+
+    # Horário inicial
+    tk.Label(edit, text="Novo horário inicial:").pack(pady=(10, 0))
+    horario_var = tk.StringVar(value=inicio)
+    combo_horario = ttk.Combobox(
+        edit,
+        textvariable=horario_var,
+        values=HORARIOS,
+        state="readonly"
+    )
+    combo_horario.pack(pady=5)
+
+    # Observações
+    tk.Label(edit, text="Observações (opcional):").pack()
+    obs_entry = tk.Entry(edit)
+    obs_entry.insert(0, obs)
+    obs_entry.pack(pady=5, fill=tk.X, padx=20)
+
+    # BOTÃO SALVAR ALTERAÇÕES
+    def salvar_edicao():
+        novo_servico = servico_var.get()
+        nova_obs = obs_entry.get().strip()
+        novo_inicio = horario_var.get()
+        nova_data_iso = data_destino_iso_var.get()
+
+        if novo_inicio not in HORARIOS:
+            messagebox.showerror("Erro", "Horário inválido.", parent=edit)
+            return
+
+        if not nova_data_iso:
+            messagebox.showerror("Erro", "Data de destino inválida.", parent=edit)
+            return
+
+        garantir_dia_na_agenda(agenda, nova_data_iso)
+
+        nova_duracao = SERVICOS[novo_servico]
+        blocos = nova_duracao // INTERVALO
+        indice = HORARIOS.index(novo_inicio)
+
+        if indice + blocos - 1 >= len(HORARIOS):
+            messagebox.showerror(
+                "Erro",
+                "Esse serviço não cabe até o fim do expediente nesse horário.",
+                parent=edit
+            )
+            return
+
+        novos_blocos = HORARIOS[indice: indice + blocos]
+
+        # Verificar conflitos nos blocos da nova data
+        conflito_outro = None
+        for h in novos_blocos:
+            slot_h = agenda[nova_data_iso].get(h)
+            if slot_h is None:
+                continue
+
+            # Se for o mesmo agendamento (mesma data original e mesmos blocos), ignorar
+            if (nova_data_iso == data_original_iso and
+                slot_h.get("cliente") == cliente and
+                slot_h.get("inicio") == inicio):
+                continue
+
+            if conflito_outro is None:
+                conflito_outro = slot_h
+            else:
+                # Mais de um agendamento diferente nesse intervalo -> conflito não trocável
+                if (slot_h.get("cliente") != conflito_outro.get("cliente") or
+                    slot_h.get("inicio")  != conflito_outro.get("inicio")  or
+                    slot_h.get("duracao") != conflito_outro.get("duracao")):
+                    messagebox.showerror(
+                        "Erro",
+                        "Um ou mais horários desse período já estão ocupados!",
+                        parent=edit
+                    )
+                    return
+
+        # Se não há conflito, apenas mover/editar normalmente
+        if conflito_outro is None:
+            # Liberar blocos antigos do agendamento original
+            blocos_antigos = HORARIOS[
+                HORARIOS.index(inicio) : HORARIOS.index(inicio) + (duracao_original // INTERVALO)
+            ]
+            for h in blocos_antigos:
+                agenda[data_original_iso][h] = None
+
+            # Aplicar novos blocos na nova data
+            for h in novos_blocos:
+                agenda[nova_data_iso][h] = {
+                    "cliente": cliente,
+                    "servico": novo_servico,
+                    "duracao": nova_duracao,
+                    "obs": nova_obs,
+                    "inicio": novo_inicio,
+                }
+
+            salvar_agenda(agenda)
+            atualizar_lista_agenda()
+            messagebox.showinfo("Sucesso", "Agendamento alterado!", parent=edit)
+            edit.destroy()
+            return
+
+        # Há um único agendamento de outra pessoa nesse intervalo: tentar TROCA
+        outro_cliente = conflito_outro.get("cliente", "Outro cliente")
+        outro_servico = conflito_outro.get("servico")
+        outro_duracao = conflito_outro.get("duracao", 30)
+        outro_inicio = conflito_outro.get("inicio", novo_inicio)
+
+        # Blocos atuais do "outro" na nova data
+        outro_blocos_nova_data = HORARIOS[
+            HORARIOS.index(outro_inicio) : HORARIOS.index(outro_inicio) + (outro_duracao // INTERVALO)
+        ]
+
+        # Blocos livres na data original para encaixar o outro cliente
+        outro_blocos_na_data_original = HORARIOS[
+            HORARIOS.index(inicio) : HORARIOS.index(inicio) + (outro_duracao // INTERVALO)
+        ]
+
+        # Verifica se na data original só existe o nosso agendamento nesses blocos,
+        # permitindo que o outro venha pra cá.
+        for h in outro_blocos_na_data_original:
+            slot_old = agenda[data_original_iso].get(h)
+            if slot_old is not None and not (
+                slot_old.get("cliente") == cliente and
+                slot_old.get("inicio") == inicio
+            ):
+                messagebox.showerror(
+                    "Erro",
+                    "O horário de origem não comporta uma troca com esse outro agendamento.",
+                    parent=edit
+                )
+                return
+
+        # Pergunta se o usuário quer trocar
+        resp = messagebox.askyesno(
+            "Trocar horários?",
+            f"Já existe um agendamento de {outro_cliente} nesse horário.\n\n"
+            f"Deseja TROCAR os horários entre {cliente} e {outro_cliente}?",
+            parent=edit
+        )
+
+        if not resp:
+            return
+
+        # 1) Liberar blocos antigos do nosso agendamento na data original
+        blocos_nossos_originais = HORARIOS[
+            HORARIOS.index(inicio) : HORARIOS.index(inicio) + (duracao_original // INTERVALO)
+        ]
+        for h in blocos_nossos_originais:
+            agenda[data_original_iso][h] = None
+
+        # 2) Liberar blocos do outro cliente na data nova
+        for h in outro_blocos_nova_data:
+            agenda[nova_data_iso][h] = None
+
+        # 3) Colocar nosso cliente na nova data/horário
+        for h in novos_blocos:
+            agenda[nova_data_iso][h] = {
+                "cliente": cliente,
+                "servico": novo_servico,
+                "duracao": nova_duracao,
+                "obs": nova_obs,
+                "inicio": novo_inicio,
+            }
+
+        # 4) Colocar o outro cliente na data original, no horário antigo do nosso
+        for h in outro_blocos_na_data_original:
+            agenda[data_original_iso][h] = {
+                "cliente": outro_cliente,
+                "servico": outro_servico,
+                "duracao": outro_duracao,
+                "obs": conflito_outro.get("obs", ""),
+                "inicio": inicio,  # ele passa a começar onde o nosso começava
+            }
+
+        salvar_agenda(agenda)
+        atualizar_lista_agenda()
+        messagebox.showinfo("Sucesso", "Agendamentos trocados com sucesso!", parent=edit)
+        edit.destroy()
+
+    tk.Button(edit, text="💾 Salvar alterações", command=salvar_edicao).pack(pady=15)
 
 # ----- DETALHES DO AGENDAMENTO (DUPLO CLIQUE) -----
 
@@ -811,13 +1077,21 @@ btn_cli = tk.Button(
 )
 btn_cli.grid(row=1, column=1, padx=5, pady=5)
 
+btn_editar = tk.Button(
+    frame_botoes,
+    text="✏️ Editar agendamento",
+    width=20,
+    command=janela_editar_agendamento
+)
+btn_editar.grid(row=2, column=0, padx=5, pady=5)
+
 btn_buscar = tk.Button(
     frame_botoes,
     text="🔍 Buscar cliente",
     width=20,
     command=janela_buscar_cliente,
 )
-btn_buscar.grid(row=2, column=0, columnspan=2, pady=5)
+btn_buscar.grid(row=2, column=1, columnspan=2, pady=5)
 
 # ----- INICIALIZAÇÃO -----
 

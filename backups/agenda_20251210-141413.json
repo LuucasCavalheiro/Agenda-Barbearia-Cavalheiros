@@ -339,22 +339,10 @@
     "13:30": null,
     "14:00": null,
     "14:30": null,
-    "15:00": {
-      "cliente": "Elizandro",
-      "servico": "Cabelo",
-      "duracao": 30,
-      "obs": "Filho do Elizandro",
-      "inicio": "15:00"
-    },
+    "15:00": null,
     "15:30": null,
     "16:00": null,
-    "16:30": {
-      "cliente": "Elizandro",
-      "servico": "Cabelo",
-      "duracao": 30,
-      "obs": "",
-      "inicio": "16:30"
-    },
+    "16:30": null,
     "17:00": null,
     "17:30": null,
     "18:00": null,
