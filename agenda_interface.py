@@ -6,10 +6,17 @@ from datetime import datetime
 from tkcalendar import Calendar
 import shutil
 from datetime import datetime
+from datetime import timedelta
+try:
+    import holidays
+    FERIADOS_BR = holidays.Brazil()  # feriados nacionais do Brasil
+except ImportError:
+    FERIADOS_BR = None
 
 ARQUIVO_AGENDA = "agenda.json"
 ARQUIVO_CLIENTES = "clientes.json"
 BACKUP_DIR = "backups"
+FERIADOS_FIXOS = {}
 
 HORARIO_INICIO = (9, 0)    # 09:00
 HORARIO_FIM = (20, 30)     # 20:30
@@ -20,6 +27,21 @@ SERVICOS = {
     "Barba": 30,
     "Cabelo e Barba": 60,
     "Outro": 30,
+}
+
+PRECO_SERVICOS = {
+    "Cabelo": 50.00,
+    "Barba": 40.00,
+    "Cabelo e Barba": 80.0,
+    "Outro": 80.0,
+    "Oleo para Barba": 60.00,
+    "Pomada para Cabelo Seco": 35.00,
+    "Pomada para Cabelo Brilhoso": 35.00,
+    "Balm para Barba": 35.00,
+    "Minoxidil 10%": 70.00,
+    "Escova Barba": 20.00,
+    "Sabonete Esfoliante": 20.00,
+    "Cera em pó p/ cabelo": 60.00,
 }
 
 DIAS_SEMANA = [
@@ -141,7 +163,7 @@ clientes = carregar_clientes()
 
 root = tk.Tk()
 root.title("Agenda - Barbearia Cavalheiros")
-root.geometry("520x480")
+root.geometry("510x600")
 
 # ----- TOPO: DATA + BOTÕES -----
 
@@ -210,6 +232,11 @@ dia_semana_var = tk.StringVar()
 label_dia_semana = tk.Label(root, textvariable=dia_semana_var, font=("Arial", 10))
 label_dia_semana.pack()
 
+# 👇 NOVO: aviso de feriado
+aviso_feriado_var = tk.StringVar()
+label_feriado = tk.Label(root, textvariable=aviso_feriado_var, font=("Arial", 9), fg="red")
+label_feriado.pack(pady=(0, 2))
+
 aviso_aniver_var = tk.StringVar()
 label_aniver = tk.Label(root, textvariable=aviso_aniver_var, font=("Arial", 9), fg="purple")
 label_aniver.pack(pady=(0, 5))
@@ -230,6 +257,58 @@ scroll.pack(side=tk.RIGHT, fill=tk.Y)
 lista_horarios.config(yscrollcommand=scroll.set)
 
 # ----- FUNÇÕES DE ATUALIZAÇÃO DA TELA -----
+
+def eh_feriado_data_iso(data_iso):
+    """
+    Recebe 'AAAA-MM-DD' e diz se é feriado.
+    Retorna (eh_feriado: bool, nome_feriado: str ou None)
+    """
+    # Se tiver biblioteca de feriados
+    if FERIADOS_BR is not None:
+        try:
+            dt = datetime.strptime(data_iso, "%Y-%m-%d").date()
+        except ValueError:
+            return False, None
+        nome = FERIADOS_BR.get(dt)
+        if nome:
+            return True, str(nome)
+
+    # Fallback opcional se você tiver aquele dicionário FERIADOS_FIXOS
+    if "FERIADOS_FIXOS" in globals():
+        try:
+            dt2 = datetime.strptime(data_iso, "%Y-%m-%d")
+            chave = dt2.strftime("%d-%m")
+        except ValueError:
+            return False, None
+        nome2 = FERIADOS_FIXOS.get(chave)
+        if nome2:
+            return True, nome2
+
+    return False, None
+
+def atualizar_aviso_feriado():
+    """Mostra aviso se o dia selecionado for feriado (Brasil)."""
+    aviso_feriado_var.set("")
+
+    # se não tiver biblioteca de feriados, não faz nada
+    if FERIADOS_BR is None:
+        return
+
+    data_str = data_var.get().strip()
+    data_iso = str_data_para_iso(data_str)
+    if not data_iso:
+        return
+
+    try:
+        dt = datetime.strptime(data_iso, "%Y-%m-%d").date()
+    except ValueError:
+        return
+
+    nome_feriado = FERIADOS_BR.get(dt)
+    if nome_feriado:
+        aviso_feriado_var.set(f"📢 FERIADO: {nome_feriado}")
+    else:
+        aviso_feriado_var.set("")
 
 def atualizar_dia_semana():
     data_str = data_var.get().strip()
@@ -284,6 +363,7 @@ def atualizar_lista_agenda():
 
     atualizar_dia_semana()
     atualizar_aviso_aniversario()
+    atualizar_aviso_feriado()
 
     lista_horarios.delete(0, tk.END)
     label_dia.config(text=f"Agenda do dia {iso_para_br(data_iso)}")
@@ -478,13 +558,6 @@ def janela_agendar():
         blocos = duracao // INTERVALO
         indice = HORARIOS.index(hora_inicial)
 
-        if indice + blocos - 1 >= len(HORARIOS):
-            messagebox.showerror(
-                "Erro",
-                "Esse serviço não cabe até o fim do expediente nesse horário."
-            )
-            return
-
         blocos_horarios = HORARIOS[indice: indice + blocos]
 
         # Verificar se todos os blocos estão livres
@@ -496,14 +569,24 @@ def janela_agendar():
             return
 
         # Gravar agendamento
+        
+        preco = PRECO_SERVICOS.get(servico, 0.0)
+
         for h in blocos_horarios:
             agenda[data_iso][h] = {
-                "cliente": nome,
-                "servico": servico,
-                "duracao": duracao,
-                "obs": obs,
-                "inicio": hora_inicial,
-            }
+            "cliente": nome,
+            "servico": servico,
+            "duracao": duracao,
+            "obs": obs,
+            "inicio": hora_inicial,
+            "preco": preco,
+            "pago": False,
+            "extras": [],
+            "pacote": False,            # 👈 normal é NÃO ser pacote
+            "pacote_nome": None,
+            "pacote_valor_mensal": 0.0,
+    }
+            
 
         salvar_agenda(agenda)
         atualizar_lista_agenda()
@@ -595,6 +678,14 @@ def janela_editar_agendamento():
     inicio = slot.get("inicio", hora)
     duracao_original = slot.get("duracao", SERVICOS.get(servico, 30))
     data_original_iso = data_iso
+    preco_original = slot.get("preco", PRECO_SERVICOS.get(servico, 0.0))
+    pago_original = slot.get("pago", False)
+    preco_original = slot.get("preco", PRECO_SERVICOS.get(servico, 0.0))
+    extras_orig = slot.get("extras", [])
+    pago_original = slot.get("pago", False)
+    pacote_flag = slot.get("pacote", False)
+    pacote_nome = slot.get("pacote_nome")
+    pacote_valor = slot.get("pacote_valor_mensal", 0.0)
 
     # ---------------------------
     # JANELA DE EDIÇÃO
@@ -682,13 +773,7 @@ def janela_editar_agendamento():
         blocos = nova_duracao // INTERVALO
         indice = HORARIOS.index(novo_inicio)
 
-        if indice + blocos - 1 >= len(HORARIOS):
-            messagebox.showerror(
-                "Erro",
-                "Esse serviço não cabe até o fim do expediente nesse horário.",
-                parent=edit
-            )
-            return
+        
 
         novos_blocos = HORARIOS[indice: indice + blocos]
 
@@ -729,6 +814,7 @@ def janela_editar_agendamento():
                 agenda[data_original_iso][h] = None
 
             # Aplicar novos blocos na nova data
+            preco_novo = PRECO_SERVICOS.get(novo_servico, 0.0)
             for h in novos_blocos:
                 agenda[nova_data_iso][h] = {
                     "cliente": cliente,
@@ -736,6 +822,12 @@ def janela_editar_agendamento():
                     "duracao": nova_duracao,
                     "obs": nova_obs,
                     "inicio": novo_inicio,
+                    "preco": preco_novo,
+                    "pago": pago_original,
+                    "extras": extras_orig,
+                    "pacote": pacote_flag,
+                    "pacote_nome": pacote_nome,
+                    "pacote_valor_mensal": pacote_valor,
                 }
 
             salvar_agenda(agenda)
@@ -749,6 +841,9 @@ def janela_editar_agendamento():
         outro_servico = conflito_outro.get("servico")
         outro_duracao = conflito_outro.get("duracao", 30)
         outro_inicio = conflito_outro.get("inicio", novo_inicio)
+        outro_preco = conflito_outro.get("preco", PRECO_SERVICOS.get(outro_servico, 0.0))
+        outro_pago = conflito_outro.get("pago", False)
+        outro_extras = conflito_outro.get("extras", [])
 
         # Blocos atuais do "outro" na nova data
         outro_blocos_nova_data = HORARIOS[
@@ -798,14 +893,21 @@ def janela_editar_agendamento():
             agenda[nova_data_iso][h] = None
 
         # 3) Colocar nosso cliente na nova data/horário
+        preco_novo = PRECO_SERVICOS.get(novo_servico, 0.0)
         for h in novos_blocos:
-            agenda[nova_data_iso][h] = {
-                "cliente": cliente,
-                "servico": novo_servico,
-                "duracao": nova_duracao,
-                "obs": nova_obs,
-                "inicio": novo_inicio,
-            }
+                agenda[nova_data_iso][h] = {
+                    "cliente": cliente,
+                    "servico": novo_servico,
+                    "duracao": nova_duracao,
+                    "obs": nova_obs,
+                    "inicio": novo_inicio,
+                    "preco": preco_novo,
+                    "pago": pago_original,
+                    "extras": extras_orig,
+                    "pacote": pacote_flag,
+                    "pacote_nome": pacote_nome,
+                    "pacote_valor_mensal": pacote_valor,
+                    }
 
         # 4) Colocar o outro cliente na data original, no horário antigo do nosso
         for h in outro_blocos_na_data_original:
@@ -815,6 +917,8 @@ def janela_editar_agendamento():
                 "duracao": outro_duracao,
                 "obs": conflito_outro.get("obs", ""),
                 "inicio": inicio,  # ele passa a começar onde o nosso começava
+                "preco": outro_preco,
+                "pago": outro_pago,
             }
 
         salvar_agenda(agenda)
@@ -969,6 +1073,897 @@ def abrir_aniversarios():
 
     atualizar_lista_clientes()
 
+
+
+# ----- JANELA DE CAIXA -----
+
+def registrar_venda_avulsa():
+    """Registra venda de produto sem precisar de agendamento."""
+    data_str = data_var.get().strip()
+    data_iso = str_data_para_iso(data_str)
+    if not data_iso:
+        messagebox.showerror("Erro", "Data inválida. Use o formato DD/MM/AAAA.")
+        return
+
+    garantir_dia_na_agenda(agenda, data_iso)
+
+    win = tk.Toplevel(root)
+    win.title(f"Venda de produto - {data_str}")
+    win.geometry("350x260")
+
+    tk.Label(win, text=f"Data: {data_str}", font=("Arial", 10, "bold")).pack(pady=5)
+
+    # Cliente (opcional)
+    tk.Label(win, text="Cliente (opcional):").pack()
+    cliente_var = tk.StringVar()
+    entry_cliente = tk.Entry(win, textvariable=cliente_var)
+    entry_cliente.pack(pady=5, fill=tk.X, padx=20)
+
+    # Produto
+    tk.Label(win, text="Produto:").pack()
+    itens_venda = sorted(PRECO_SERVICOS.keys())
+    prod_var = tk.StringVar()
+    combo_prod = ttk.Combobox(win, textvariable=prod_var, values=itens_venda, state="readonly")
+    combo_prod.pack(pady=5, fill=tk.X, padx=20)
+
+    # Valor
+    tk.Label(win, text="Valor (R$):").pack()
+    valor_var = tk.StringVar()
+    entry_valor = tk.Entry(win, textvariable=valor_var)
+    entry_valor.pack(pady=5, fill=tk.X, padx=20)
+
+    def on_escolher_produto(event=None):
+        nome = prod_var.get()
+        if nome:
+            valor_padrao = PRECO_SERVICOS.get(nome, 0.0)
+            valor_var.set(f"{valor_padrao:.2f}")
+
+    combo_prod.bind("<<ComboboxSelected>>", on_escolher_produto)
+
+    # Pago agora?
+    pago_var = tk.BooleanVar(value=True)
+    chk_pago = tk.Checkbutton(win, text="Pago agora", variable=pago_var)
+    chk_pago.pack(pady=5)
+
+    def confirmar_venda():
+        produto = prod_var.get().strip()
+        if not produto:
+            messagebox.showerror("Erro", "Escolha um produto.", parent=win)
+            return
+        try:
+            valor = float(valor_var.get().replace(",", "."))
+        except ValueError:
+            messagebox.showerror("Erro", "Valor inválido.", parent=win)
+            return
+
+        cliente = cliente_var.get().strip()
+        venda = {
+            "cliente": cliente,
+            "produto": produto,
+            "valor": valor,
+            "pago": bool(pago_var.get()),
+        }
+
+        vendas = agenda[data_iso].setdefault("_vendas_avulsas", [])
+        vendas.append(venda)
+
+        salvar_agenda(agenda)
+        messagebox.showinfo("Sucesso", "Venda registrada com sucesso!", parent=win)
+        win.destroy()
+
+    tk.Button(win, text="✅ Registrar venda", command=confirmar_venda).pack(pady=10)
+
+def abrir_caixa_dia():
+    """Mostra os atendimentos e vendas do dia com valores e status de pagamento."""
+    data_str = data_var.get().strip()
+    data_iso = str_data_para_iso(data_str)
+    if not data_iso:
+        messagebox.showerror("Erro", "Data inválida. Use o formato DD/MM/AAAA.")
+        return
+
+    garantir_dia_na_agenda(agenda, data_iso)
+
+    win = tk.Toplevel(root)
+    win.title(f"Caixa do dia - {data_str}")
+    win.geometry("700x420")
+
+    tk.Label(
+        win,
+        text=f"Caixa do dia {data_str}",
+        font=("Arial", 12, "bold")
+    ).pack(pady=5)
+
+    colunas = ("hora", "cliente", "descricao", "valor_servico", "extras", "total", "status")
+    tree = ttk.Treeview(win, columns=colunas, show="headings", height=13)
+    tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+    tree.heading("hora", text="Hora")
+    tree.heading("cliente", text="Cliente")
+    tree.heading("descricao", text="Serviço / Produto")
+    tree.heading("valor_servico", text="Serviço/Prod (R$)")
+    tree.heading("extras", text="Extras (R$)")
+    tree.heading("total", text="Total (R$)")
+    tree.heading("status", text="Status")
+
+    tree.column("hora", width=60, anchor="center")
+    tree.column("cliente", width=150)
+    tree.column("descricao", width=170)
+    tree.column("valor_servico", width=100, anchor="e")
+    tree.column("extras", width=90, anchor="e")
+    tree.column("total", width=90, anchor="e")
+    tree.column("status", width=80, anchor="center")
+
+    totais_var = tk.StringVar()
+    label_totais = tk.Label(win, textvariable=totais_var, font=("Arial", 10, "bold"))
+    label_totais.pack(pady=(0, 5))
+
+    # lista em memória; cada item tem 'tipo' e 'iid' da tree
+    atendimentos = []
+
+    def atualizar_lista_caixa():
+        atendimentos.clear()
+        tree.delete(*tree.get_children())
+
+        total_pago = 0.0
+        total_pendente = 0.0
+
+        # 1) Agendamentos
+        for h in HORARIOS:
+            slot = agenda[data_iso].get(h)
+            if not slot:
+                continue
+            if slot.get("inicio") != h:
+                continue  # só o bloco inicial
+
+            cliente = slot.get("cliente", "")
+            servico = slot.get("servico", "")
+            preco_serv = float(slot.get("preco", PRECO_SERVICOS.get(servico, 0.0)))
+            extras_list = slot.get("extras", [])
+            extras_total = sum(float(e.get("valor", 0.0)) for e in extras_list)
+            total = preco_serv + extras_total
+            pago = bool(slot.get("pago", False))
+
+            status_txt = "Pago" if pago else "Pendente"
+            if pago:
+                total_pago += total
+            else:
+                total_pendente += total
+
+            iid = tree.insert(
+                "",
+                tk.END,
+                values=(
+                    h,
+                    cliente,
+                    servico,
+                    f"{preco_serv:.2f}",
+                    f"{extras_total:.2f}",
+                    f"{total:.2f}",
+                    status_txt,
+                )
+            )
+
+            atendimentos.append({
+                "tipo": "agendamento",
+                "iid": iid,
+                "hora": h,
+                "pago": pago,
+            })
+
+        # 2) Vendas avulsas
+        vendas_avulsas = agenda[data_iso].get("_vendas_avulsas", [])
+        for idx, v in enumerate(vendas_avulsas):
+            cliente = v.get("cliente", "").strip() or "Venda avulsa"
+            produto = v.get("produto", "")
+            valor = float(v.get("valor", 0.0))
+            pago = bool(v.get("pago", True))
+            extras_total = 0.0
+            total = valor
+
+            status_txt = "Pago" if pago else "Pendente"
+            if pago:
+                total_pago += total
+            else:
+                total_pendente += total
+
+            iid = tree.insert(
+                "",
+                tk.END,
+                values=(
+                    "--",                    # sem horário específico
+                    cliente,
+                    f"(Prod.) {produto}",
+                    f"{valor:.2f}",
+                    f"{extras_total:.2f}",
+                    f"{total:.2f}",
+                    status_txt,
+                )
+            )
+
+            atendimentos.append({
+                "tipo": "venda",
+                "iid": iid,
+                "indice": idx,
+                "pago": pago,
+            })
+
+        totais_var.set(
+            f"Total recebido: R$ {total_pago:.2f}   |   "
+            f"Total pendente: R$ {total_pendente:.2f}"
+        )
+
+    def encontrar_atendimento_por_iid(iid):
+        for a in atendimentos:
+            if a["iid"] == iid:
+                return a
+        return None
+
+    def marcar_como_pago():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showinfo("Info", "Selecione um item para marcar como pago.", parent=win)
+            return
+
+        item = sel[0]
+        at = encontrar_atendimento_por_iid(item)
+        if not at:
+            return
+
+        if at["pago"]:
+            messagebox.showinfo("Info", "Esse item já está marcado como pago.", parent=win)
+            return
+
+        if at["tipo"] == "agendamento":
+            hora_inicio = at["hora"]
+            slot = agenda[data_iso].get(hora_inicio)
+            if not slot:
+                return
+
+            dur = slot.get("duracao", 30)
+            blocos = dur // INTERVALO
+            idx_inicio = HORARIOS.index(hora_inicio)
+            blocos_h = HORARIOS[idx_inicio: idx_inicio + blocos]
+
+            for h in blocos_h:
+                if agenda[data_iso].get(h):
+                    agenda[data_iso][h]["pago"] = True
+
+        elif at["tipo"] == "venda":
+            vendas_avulsas = agenda[data_iso].get("_vendas_avulsas", [])
+            idx = at["indice"]
+            if 0 <= idx < len(vendas_avulsas):
+                vendas_avulsas[idx]["pago"] = True
+
+        salvar_agenda(agenda)
+        atualizar_lista_caixa()
+        messagebox.showinfo("Sucesso", "Item marcado como pago.", parent=win)
+
+    def adicionar_produto():
+        sel = tree.selection()
+        if not sel:
+            messagebox.showinfo("Info", "Selecione um atendimento para adicionar produto.", parent=win)
+            return
+
+        item = sel[0]
+        at = encontrar_atendimento_por_iid(item)
+        if not at:
+            return
+
+        if at["tipo"] != "agendamento":
+            messagebox.showinfo("Info", "Produtos extras só podem ser adicionados em agendamentos.", parent=win)
+            return
+
+        hora_inicio = at["hora"]
+        slot = agenda[data_iso].get(hora_inicio)
+        if not slot:
+            return
+
+        wprod = tk.Toplevel(win)
+        wprod.title("Adicionar produto ao atendimento")
+        wprod.geometry("320x190")
+
+        tk.Label(wprod, text="Produto:", font=("Arial", 10)).pack(pady=(10, 0))
+        itens_venda = sorted(PRECO_SERVICOS.keys())
+        prod_var = tk.StringVar()
+        combo_prod = ttk.Combobox(wprod, textvariable=prod_var, values=itens_venda, state="readonly")
+        combo_prod.pack(pady=5, fill=tk.X, padx=20)
+
+        tk.Label(wprod, text="Valor (R$):").pack()
+        valor_var = tk.StringVar()
+        entry_valor = tk.Entry(wprod, textvariable=valor_var)
+        entry_valor.pack(pady=5, fill=tk.X, padx=20)
+
+        def on_escolher_prod(event=None):
+            nome = prod_var.get()
+            if nome:
+                valor_padrao = PRECO_SERVICOS.get(nome, 0.0)
+                valor_var.set(f"{valor_padrao:.2f}")
+
+        combo_prod.bind("<<ComboboxSelected>>", on_escolher_prod)
+
+        def confirmar_produto():
+            nome = prod_var.get().strip()
+            if not nome:
+                messagebox.showerror("Erro", "Escolha um produto.", parent=wprod)
+                return
+            try:
+                valor = float(valor_var.get().replace(",", "."))
+            except ValueError:
+                messagebox.showerror("Erro", "Valor inválido.", parent=wprod)
+                return
+
+            dur = slot.get("duracao", 30)
+            blocos = dur // INTERVALO
+            idx_inicio = HORARIOS.index(hora_inicio)
+            blocos_h = HORARIOS[idx_inicio: idx_inicio + blocos]
+
+            for h in blocos_h:
+                s = agenda[data_iso].get(h)
+                if not s:
+                    continue
+                lista_extras = s.get("extras", [])
+                lista_extras.append({"nome": nome, "valor": valor})
+                s["extras"] = lista_extras
+
+            salvar_agenda(agenda)
+            atualizar_lista_caixa()
+            wprod.destroy()
+
+        tk.Button(wprod, text="✅ Adicionar", command=confirmar_produto).pack(pady=10)
+
+    btn_frame = tk.Frame(win)
+    btn_frame.pack(pady=5)
+
+    tk.Button(
+        btn_frame,
+        text="✅ Marcar como pago",
+        command=marcar_como_pago
+    ).pack(side=tk.LEFT, padx=5)
+
+    tk.Button(
+        btn_frame,
+        text="➕ Produto em atendimento",
+        command=adicionar_produto
+    ).pack(side=tk.LEFT, padx=5)
+
+    atualizar_lista_caixa()
+
+# ------ JANELA DE RELATORIOS ------
+def calcular_resumo_datas(lista_datas_iso):
+    """
+    Recebe uma lista de datas (ISO) e calcula:
+    - total de atendimentos
+    - total em serviços
+    - total em produtos (extras + vendas avulsas)
+    - total recebido / pendente
+    - contagem de serviços e produtos
+    """
+    total_atendimentos = 0
+
+    total_servicos = 0.0      # só corte/barba/etc
+    total_produtos = 0.0      # extras + vendas avulsas
+    total_pago = 0.0
+    total_pendente = 0.0
+
+    contagem_servicos = {}
+    contagem_produtos = {}
+
+    for data_iso in lista_datas_iso:
+        dia = agenda.get(data_iso, {})
+
+        # 1) Atendimentos (agendamentos)
+        for h in HORARIOS:
+            slot = dia.get(h)
+            if not slot:
+                continue
+            if slot.get("inicio") != h:
+                continue  # só o bloco inicial
+
+            servico = slot.get("servico", "")
+            preco_serv = float(slot.get("preco", PRECO_SERVICOS.get(servico, 0.0)))
+            extras_list = slot.get("extras", [])
+            extras_total = sum(float(e.get("valor", 0.0)) for e in extras_list)
+            total = preco_serv + extras_total
+            pago = bool(slot.get("pago", False))
+
+            total_atendimentos += 1
+            total_servicos += preco_serv
+            total_produtos += extras_total
+
+            contagem_servicos[servico] = contagem_servicos.get(servico, 0) + 1
+            for e in extras_list:
+                nome_prod = e.get("nome", "Produto")
+                contagem_produtos[nome_prod] = contagem_produtos.get(nome_prod, 0) + 1
+
+            if pago:
+                total_pago += total
+            else:
+                total_pendente += total
+
+        # 2) Vendas avulsas
+        vendas_avulsas = dia.get("_vendas_avulsas", [])
+        for v in vendas_avulsas:
+            produto = v.get("produto", "Produto")
+            valor = float(v.get("valor", 0.0))
+            pago = bool(v.get("pago", True))
+
+            total_produtos += valor
+            contagem_produtos[produto] = contagem_produtos.get(produto, 0) + 1
+
+            if pago:
+                total_pago += valor
+            else:
+                total_pendente += valor
+
+    total_geral = total_pago + total_pendente
+
+    return {
+        "total_atendimentos": total_atendimentos,
+        "total_servicos": total_servicos,
+        "total_produtos": total_produtos,
+        "total_pago": total_pago,
+        "total_pendente": total_pendente,
+        "total_geral": total_geral,
+        "contagem_servicos": contagem_servicos,
+        "contagem_produtos": contagem_produtos,
+    }
+
+def abrir_relatorio_dia():
+    """Relatório do dia atual mostrado na tela."""
+    data_str = data_var.get().strip()
+    data_iso = str_data_para_iso(data_str)
+    if not data_iso:
+        messagebox.showerror("Erro", "Data inválida. Use o formato DD/MM/AAAA.")
+        return
+
+    if data_iso not in agenda:
+        messagebox.showinfo("Info", "Não há dados para essa data.")
+        return
+
+    resumo = calcular_resumo_datas([data_iso])
+
+    win = tk.Toplevel(root)
+    win.title(f"Relatório diário - {data_str}")
+    win.geometry("480x420")
+
+    tk.Label(
+        win,
+        text=f"Relatório do dia {data_str}",
+        font=("Arial", 12, "bold")
+    ).pack(pady=5)
+
+    txt = []
+
+    txt.append(f"Atendimentos: {resumo['total_atendimentos']}")
+    txt.append(f"Total em serviços: R$ {resumo['total_servicos']:.2f}")
+    txt.append(f"Total em produtos: R$ {resumo['total_produtos']:.2f}")
+    txt.append("")
+    txt.append(f"Total RECEBIDO: R$ {resumo['total_pago']:.2f}")
+    txt.append(f"Total PENDENTE: R$ {resumo['total_pendente']:.2f}")
+    txt.append(f"Total GERAL (pago + pendente): R$ {resumo['total_geral']:.2f}")
+    txt.append("")
+    txt.append("Serviços mais realizados:")
+
+    # top 5 serviços
+    servicos = sorted(
+        resumo["contagem_servicos"].items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+    if servicos:
+        for nome, qtd in servicos[:5]:
+            txt.append(f"  - {nome}: {qtd}")
+    else:
+        txt.append("  (nenhum serviço)")
+
+    txt.append("")
+    txt.append("Produtos mais vendidos (extras + avulsos):")
+
+    produtos = sorted(
+        resumo["contagem_produtos"].items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+    if produtos:
+        for nome, qtd in produtos[:5]:
+            txt.append(f"  - {nome}: {qtd}")
+    else:
+        txt.append("  (nenhum produto)")
+
+    texto_final = "\n".join(txt)
+
+    lbl = tk.Label(
+        win,
+        text=texto_final,
+        justify="left",
+        font=("Arial", 10)
+    )
+    lbl.pack(padx=10, pady=10, anchor="w")
+
+def abrir_relatorio_mes():
+    """Abre uma janelinha para escolher o mês e gerar relatório mensal."""
+    sel = tk.Toplevel(root)
+    sel.title("Escolher mês para relatório")
+    sel.geometry("280x300")
+
+    tk.Label(sel, text="Escolha uma data do mês desejado:", font=("Arial", 10)).pack(pady=5)
+
+    cal = Calendar(
+        sel,
+        selectmode="day",
+        date_pattern="dd/mm/yyyy"
+    )
+    cal.pack(pady=10)
+
+    def confirmar():
+        data_br = cal.get_date()  # dd/mm/yyyy
+        try:
+            dt = datetime.strptime(data_br, "%d/%m/%Y")
+        except ValueError:
+            messagebox.showerror("Erro", "Data inválida.", parent=sel)
+            return
+
+        mes = dt.month
+        ano = dt.year
+
+        # pega todas as datas da agenda que sejam desse mês/ano
+        datas_mes = []
+        for data_iso in agenda.keys():
+            try:
+                d = datetime.strptime(data_iso, "%Y-%m-%d")
+            except ValueError:
+                continue
+            if d.year == ano and d.month == mes:
+                datas_mes.append(data_iso)
+
+        if not datas_mes:
+            messagebox.showinfo(
+                "Info",
+                f"Não há registros para {mes:02d}/{ano}.",
+                parent=sel
+            )
+            return
+
+        sel.destroy()
+        mostrar_relatorio_mes(datas_mes, mes, ano)
+
+    tk.Button(sel, text="Gerar relatório", command=confirmar).pack(pady=10)
+
+
+def mostrar_relatorio_mes(datas_mes, mes, ano):
+    """Mostra o relatório consolidado de um mês."""
+    resumo = calcular_resumo_datas(datas_mes)
+
+    win = tk.Toplevel(root)
+    win.title(f"Relatório mensal - {mes:02d}/{ano}")
+    win.geometry("520x440")
+
+    tk.Label(
+        win,
+        text=f"Relatório de {mes:02d}/{ano}",
+        font=("Arial", 12, "bold")
+    ).pack(pady=5)
+
+    txt = []
+
+    txt.append(f"Dias com movimento: {len(datas_mes)}")
+    txt.append(f"Atendimentos no mês: {resumo['total_atendimentos']}")
+    txt.append(f"Total em serviços: R$ {resumo['total_servicos']:.2f}")
+    txt.append(f"Total em produtos: R$ {resumo['total_produtos']:.2f}")
+    txt.append("")
+    txt.append(f"Total RECEBIDO: R$ {resumo['total_pago']:.2f}")
+    txt.append(f"Total PENDENTE: R$ {resumo['total_pendente']:.2f}")
+    txt.append(f"Total GERAL (pago + pendente): R$ {resumo['total_geral']:.2f}")
+    txt.append("")
+    txt.append("Serviços mais realizados no mês:")
+
+    servicos = sorted(
+        resumo["contagem_servicos"].items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+    if servicos:
+        for nome, qtd in servicos[:10]:
+            txt.append(f"  - {nome}: {qtd}")
+    else:
+        txt.append("  (nenhum serviço)")
+
+    txt.append("")
+    txt.append("Produtos mais vendidos no mês:")
+
+    produtos = sorted(
+        resumo["contagem_produtos"].items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+    if produtos:
+        for nome, qtd in produtos[:10]:
+            txt.append(f"  - {nome}: {qtd}")
+    else:
+        txt.append("  (nenhum produto)")
+
+    texto_final = "\n".join(txt)
+
+    lbl = tk.Label(
+        win,
+        text=texto_final,
+        justify="left",
+        font=("Arial", 10)
+    )
+    lbl.pack(padx=10, pady=10, anchor="w")
+
+# ------ JANELA DE CLIENTES FIXOS DE PACOTE ------
+
+def janela_pacote_cliente():
+    """Cria agendamentos recorrentes de pacote (cliente fixo) por várias semanas."""
+    if not clientes:
+        messagebox.showinfo("Info", "Nenhum cliente cadastrado ainda.")
+        return
+
+    win = tk.Toplevel(root)
+    win.title("Cliente fixo / Pacote")
+    win.geometry("420x440")
+
+    tk.Label(win, text="Configurar cliente fixo (pacote)", font=("Arial", 12, "bold")).pack(pady=5)
+
+    # -------------------------
+    # DADOS BÁSICOS DO CLIENTE
+    # -------------------------
+    frame_cli = tk.Frame(win)
+    frame_cli.pack(fill=tk.X, padx=10, pady=5)
+
+    tk.Label(frame_cli, text="Cliente:").grid(row=0, column=0, sticky="e")
+    nomes_clientes = sorted(clientes.keys())
+    cli_var = tk.StringVar()
+    combo_cli = ttk.Combobox(frame_cli, textvariable=cli_var, values=nomes_clientes, state="readonly")
+    combo_cli.grid(row=0, column=1, padx=5, pady=2, sticky="w")
+
+    tk.Label(frame_cli, text="Dia da semana:").grid(row=1, column=0, sticky="e")
+    dia_var = tk.StringVar(value="Segunda-feira")
+    combo_dia = ttk.Combobox(frame_cli, textvariable=dia_var, values=DIAS_SEMANA, state="readonly")
+    combo_dia.grid(row=1, column=1, padx=5, pady=2, sticky="w")
+
+    tk.Label(frame_cli, text="Horário:").grid(row=2, column=0, sticky="e")
+    hora_var = tk.StringVar(value=HORARIOS[0])
+    combo_hora = ttk.Combobox(frame_cli, textvariable=hora_var, values=HORARIOS, state="readonly")
+    combo_hora.grid(row=2, column=1, padx=5, pady=2, sticky="w")
+
+    tk.Label(frame_cli, text="Data inicial (DD/MM/AAAA):").grid(row=3, column=0, sticky="e")
+    data_ini_var = tk.StringVar(value=datetime.now().strftime("%d/%m/%Y"))
+    entry_data_ini = tk.Entry(frame_cli, textvariable=data_ini_var, width=12)
+    entry_data_ini.grid(row=3, column=1, padx=5, pady=2, sticky="w")
+
+    tk.Label(frame_cli, text="Número de semanas:").grid(row=4, column=0, sticky="e")
+    semanas_var = tk.StringVar(value="52")
+    entry_semanas = tk.Entry(frame_cli, textvariable=semanas_var, width=6)
+    entry_semanas.grid(row=4, column=1, padx=5, pady=2, sticky="w")
+
+    # -------------------------
+    # SERVIÇOS ALTERNADOS
+    # -------------------------
+    frame_serv = tk.Frame(win)
+    frame_serv.pack(fill=tk.X, padx=10, pady=10)
+
+    servicos_lista = list(SERVICOS.keys())
+
+    tk.Label(frame_serv, text="Semana ímpar:").grid(row=0, column=0, sticky="e")
+    serv_impar_var = tk.StringVar(value="Barba")
+    combo_impar = ttk.Combobox(frame_serv, textvariable=serv_impar_var, values=servicos_lista, state="readonly")
+    combo_impar.grid(row=0, column=1, padx=5, pady=2, sticky="w")
+
+    tk.Label(frame_serv, text="Semana par:").grid(row=1, column=0, sticky="e")
+    serv_par_var = tk.StringVar(value="Cabelo e Barba")
+    combo_par = ttk.Combobox(frame_serv, textvariable=serv_par_var, values=servicos_lista, state="readonly")
+    combo_par.grid(row=1, column=1, padx=5, pady=2, sticky="w")
+
+    # -------------------------
+    # DADOS DO PACOTE
+    # -------------------------
+    frame_pac = tk.Frame(win)
+    frame_pac.pack(fill=tk.X, padx=10, pady=10)
+
+    tk.Label(frame_pac, text="Nome do pacote:").grid(row=0, column=0, sticky="e")
+    pacote_nome_var = tk.StringVar(value="Pacote Mensal 170")
+    entry_pacote_nome = tk.Entry(frame_pac, textvariable=pacote_nome_var, width=22)
+    entry_pacote_nome.grid(row=0, column=1, padx=5, pady=2, sticky="w")
+
+    tk.Label(frame_pac, text="Valor mensal (R$):").grid(row=1, column=0, sticky="e")
+    pacote_valor_var = tk.StringVar(value="170.00")
+    entry_pacote_valor = tk.Entry(frame_pac, textvariable=pacote_valor_var, width=10)
+    entry_pacote_valor.grid(row=1, column=1, padx=5, pady=2, sticky="w")
+
+    tk.Label(frame_pac, text="Obs (opcional):").grid(row=2, column=0, sticky="e")
+    obs_var = tk.StringVar(value="Cliente fixo - pacote")
+    entry_obs = tk.Entry(frame_pac, textvariable=obs_var, width=25)
+    entry_obs.grid(row=2, column=1, padx=5, pady=2, sticky="w")
+
+    # -------------------------
+    # FUNÇÃO INTERNA: ESCOLHER O QUE FAZER NO FERIADO (MODO DELUXE)
+    # -------------------------
+    def escolher_acao_feriado(dt_local, nome_feriado, nome_cliente):
+        """
+        Abre uma janelinha perguntando:
+        - Dia anterior
+        - Próximo dia útil (simplesmente +1 dia)
+        - Pular essa semana
+        Retorna (acao, nova_data_datetime)
+        """
+        resultado = {"acao": "pular", "data": dt_local}
+
+        w = tk.Toplevel(win)
+        w.title("Data cai em feriado")
+        w.geometry("380x200")
+        w.grab_set()  # trava foco nessa janela
+
+        data_br = dt_local.strftime("%d/%m/%Y")
+
+        mensagem = (
+            f"{nome_cliente}\n"
+            f"A data planejada {data_br} cai em feriado:\n"
+            f"{nome_feriado}\n\n"
+            f"O que você deseja fazer para ESSA semana?"
+        )
+
+        tk.Label(w, text=mensagem, justify="left").pack(pady=10, padx=10)
+
+        btn_frame = tk.Frame(w)
+        btn_frame.pack(pady=5)
+
+        def escolher(acao):
+            if acao == "anterior":
+                resultado["acao"] = "anterior"
+                resultado["data"] = dt_local - timedelta(days=1)
+            elif acao == "proximo":
+                resultado["acao"] = "proximo"
+                resultado["data"] = dt_local + timedelta(days=1)
+            elif acao == "pular":
+                resultado["acao"] = "pular"
+                resultado["data"] = dt_local
+            w.destroy()
+
+        tk.Button(btn_frame, text="⬅️ Dia anterior", command=lambda: escolher("anterior")).grid(row=0, column=0, padx=5)
+        tk.Button(btn_frame, text="➡️ Próximo dia", command=lambda: escolher("proximo")).grid(row=0, column=1, padx=5)
+        tk.Button(btn_frame, text="⏭ Pular semana", command=lambda: escolher("pular")).grid(row=0, column=2, padx=5)
+
+        # espera a janela fechar
+        win.wait_window(w)
+        return resultado["acao"], resultado["data"]
+
+    # -------------------------
+    # BOTÃO PRINCIPAL: CRIAR PACOTE
+    # -------------------------
+    def criar_pacote():
+        nome_cli = cli_var.get().strip()
+        if not nome_cli:
+            messagebox.showerror("Erro", "Selecione um cliente.", parent=win)
+            return
+
+        dia_semana_str = dia_var.get()
+        if dia_semana_str not in DIAS_SEMANA:
+            messagebox.showerror("Erro", "Dia da semana inválido.", parent=win)
+            return
+        alvo_weekday = DIAS_SEMANA.index(dia_semana_str)  # 0=segunda
+
+        hora_ini = hora_var.get()
+        if hora_ini not in HORARIOS:
+            messagebox.showerror("Erro", "Horário inválido.", parent=win)
+            return
+
+        serv_impar = serv_impar_var.get()
+        serv_par = serv_par_var.get()
+        if serv_impar not in SERVICOS or serv_par not in SERVICOS:
+            messagebox.showerror("Erro", "Serviços inválidos.", parent=win)
+            return
+
+        try:
+            semanas = int(semanas_var.get())
+            if semanas <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Erro", "Número de semanas inválido.", parent=win)
+            return
+
+        try:
+            dt_ini = datetime.strptime(data_ini_var.get().strip(), "%d/%m/%Y")
+        except ValueError:
+            messagebox.showerror("Erro", "Data inicial inválida.", parent=win)
+            return
+
+        # Ajusta dt_ini para o primeiro dia desejado (da semana)
+        delta = (alvo_weekday - dt_ini.weekday()) % 7
+        dt = dt_ini + timedelta(days=delta)
+
+        try:
+            val_mensal = float(pacote_valor_var.get().replace(",", "."))
+        except ValueError:
+            messagebox.showerror("Erro", "Valor mensal inválido.", parent=win)
+            return
+
+        obs = obs_var.get().strip()
+        pacote_nome = pacote_nome_var.get().strip() or "Pacote"
+
+        criados = 0
+        conflitos = 0
+        ajustados_por_feriado = 0
+        pulados_por_feriado = 0
+
+        for semana_idx in range(semanas):
+            # data "base" daquela semana
+            dt_base = dt
+            data_iso_base = dt_base.strftime("%Y-%m-%d")
+
+            # checa feriado
+            eh_fer, nome_fer = eh_feriado_data_iso(data_iso_base)
+            dt_slot = dt_base
+
+            if eh_fer:
+                acao, dt_escolhida = escolher_acao_feriado(dt_base, nome_fer or "Feriado", nome_cli)
+                if acao == "pular":
+                    pulados_por_feriado += 1
+                    dt += timedelta(days=7)
+                    continue
+                else:
+                    ajustados_por_feriado += 1
+                    dt_slot = dt_escolhida
+
+            data_iso_slot = dt_slot.strftime("%Y-%m-%d")
+            garantir_dia_na_agenda(agenda, data_iso_slot)
+
+            # escolhe serviço alternando (0 = 1ª semana = ímpar "humana")
+            servico = serv_impar if (semana_idx % 2 == 0) else serv_par
+            duracao = SERVICOS[servico]
+            blocos = duracao // INTERVALO
+            idx_hora = HORARIOS.index(hora_ini)
+
+            if idx_hora + blocos - 1 >= len(HORARIOS):
+                conflitos += 1
+                dt += timedelta(days=7)
+                continue
+
+            blocos_h = HORARIOS[idx_hora: idx_hora + blocos]
+
+            # verifica conflito na data escolhida
+            if any(agenda[data_iso_slot].get(h) is not None for h in blocos_h):
+                conflitos += 1
+                dt += timedelta(days=7)
+                continue
+
+            preco = PRECO_SERVICOS.get(servico, 0.0)
+
+            for h in blocos_h:
+                agenda[data_iso_slot][h] = {
+                    "cliente": nome_cli,
+                    "servico": servico,
+                    "duracao": duracao,
+                    "obs": obs,
+                    "inicio": hora_ini,
+                    "preco": preco,
+                    "pago": False,
+                    "extras": [],
+                    "pacote": True,
+                    "pacote_nome": pacote_nome,
+                    "pacote_valor_mensal": val_mensal,
+                }
+
+            criados += 1
+            dt += timedelta(days=7)  # próxima semana
+
+        salvar_agenda(agenda)
+        atualizar_lista_agenda()
+
+        msg = f"Foram criados {criados} atendimentos de pacote."
+        if ajustados_por_feriado > 0:
+            msg += f"\n{ajustados_por_feriado} foram ajustados por caírem em feriado."
+        if pulados_por_feriado > 0:
+            msg += f"\n{pulados_por_feriado} semanas foram PULADAS por escolha sua nos feriados."
+        if conflitos > 0:
+            msg += f"\n{conflitos} semanas foram ignoradas por conflito de horário."
+
+        messagebox.showinfo("Concluído", msg, parent=win)
+        win.destroy()
+
+    tk.Button(win, text="✅ Criar agendamentos de pacote", command=criar_pacote).pack(pady=15)
+
 # ----- JANELA DE BUSCA POR CLIENTE -----
 
 def janela_buscar_cliente():
@@ -1092,6 +2087,54 @@ btn_buscar = tk.Button(
     command=janela_buscar_cliente,
 )
 btn_buscar.grid(row=2, column=1, columnspan=2, pady=5)
+
+btn_caixa = tk.Button(
+    frame_botoes,
+    text="💰 Caixa do dia",
+    width=20,
+    command=abrir_caixa_dia,
+)
+btn_caixa.grid(row=3, column=0, padx=5, pady=5)
+
+btn_caixa = tk.Button(
+    frame_botoes,
+    text="💰 Caixa do dia",
+    width=20,
+    command=abrir_caixa_dia,
+)
+btn_caixa.grid(row=3, column=0, padx=5, pady=5)
+
+btn_venda_avulsa = tk.Button(
+    frame_botoes,
+    text="🛒 Venda produto",
+    width=20,
+    command=registrar_venda_avulsa,
+)
+btn_venda_avulsa.grid(row=3, column=1, padx=5, pady=5)
+
+btn_rel_dia = tk.Button(
+    frame_botoes,
+    text="📊 Relatório do dia",
+    width=20,
+    command=abrir_relatorio_dia,
+)
+btn_rel_dia.grid(row=4, column=0, padx=5, pady=5)
+
+btn_rel_mes = tk.Button(
+    frame_botoes,
+    text="📆 Relatório mensal",
+    width=20,
+    command=abrir_relatorio_mes,
+)
+btn_rel_mes.grid(row=4, column=1, padx=5, pady=5)
+
+btn_pacote = tk.Button(
+    frame_botoes,
+    text="📦 Cliente fixo / Pacote",
+    width=20,
+    command=janela_pacote_cliente,
+)
+btn_pacote.grid(row=5, column=0, padx=5, pady=5)
 
 # ----- INICIALIZAÇÃO -----
 
