@@ -8,6 +8,7 @@ import shutil
 import re
 import webbrowser
 from urllib.parse import quote
+import urllib.parse
 try:
     import holidays
     FERIADOS_BR = holidays.Brazil()  # feriados nacionais do Brasil
@@ -54,6 +55,24 @@ DIAS_SEMANA = [
     "Sábado",
     "Domingo",
 ]
+
+FIREFOX_PATH = r"C:\Program Files\Mozilla Firefox\firefox.exe"
+def abrir_whatsapp_firefox(numero, mensagem):
+    numero = "".join(ch for ch in numero if ch.isdigit())
+    texto = urllib.parse.quote(mensagem)
+
+    url = f"https://web.whatsapp.com/send?phone={numero}&text={texto}"
+
+    try:
+        webbrowser.register(
+            "firefox",
+            None,
+            webbrowser.BackgroundBrowser(FIREFOX_PATH)
+        )
+        webbrowser.get("firefox").open(url, new=0)
+    except Exception:
+        webbrowser.open(url)
+
 
 def normalizar_telefone_br(tel: str) -> str:
     """Retorna só dígitos, com DDI 55 (ex: 5549999999999)."""
