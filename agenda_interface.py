@@ -2,11 +2,12 @@ import tkinter as tk
 from tkinter import messagebox, ttk, simpledialog
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from tkcalendar import Calendar
 import shutil
-from datetime import datetime
-from datetime import timedelta
+import re
+import webbrowser
+from urllib.parse import quote
 try:
     import holidays
     FERIADOS_BR = holidays.Brazil()  # feriados nacionais do Brasil
@@ -53,6 +54,49 @@ DIAS_SEMANA = [
     "Sábado",
     "Domingo",
 ]
+
+def normalizar_telefone_br(tel: str) -> str:
+    """Retorna só dígitos, com DDI 55 (ex: 5549999999999)."""
+    if not tel:
+        return ""
+    dig = re.sub(r"\D", "", tel)
+
+    # se vier com 55 já, ok
+    if dig.startswith("55") and len(dig) >= 12:
+        return dig
+
+    # se vier com 11 dígitos (DDD + 9 dígitos) ou 10 dígitos (DDD + 8)
+    if len(dig) in (10, 11):
+        return "55" + dig
+
+    # se vier com 9 ou 8 (sem DDD), não dá pra adivinhar direito -> retorna como está
+    return dig
+
+def copiar_para_area_transferencia(texto: str):
+    root.clipboard_clear()
+    root.clipboard_append(texto)
+    root.update()  # garante que ficou no clipboard
+
+def whatsapp_confirmar_agendamento(nome_cliente: str, data_iso: str, hora: str):
+    """Copia msg e, se tiver telefone cadastrado, abre WhatsApp com texto pronto."""
+    tel = ""
+    info = clientes.get(nome_cliente, {})
+    if isinstance(info, dict):
+        tel = info.get("tel", "")
+
+    msg = f"Olá amigo, só pra confirmar: tudo certo hoje às {hora}?"
+    copiar_para_area_transferencia(msg)
+
+    tel_norm = normalizar_telefone_br(tel)
+
+    # se tiver telefone ok, abre WhatsApp; se não, só copia e avisa
+    if tel_norm and tel_norm.startswith("55"):
+        url = f"https://wa.me/{tel_norm}?text={quote(msg)}"
+        webbrowser.open(url)
+        messagebox.showinfo("WhatsApp", "Mensagem copiada e WhatsApp aberto ✅")
+    else:
+        messagebox.showinfo("WhatsApp", "Mensagem copiada ✅\n(Cliente sem telefone válido cadastrado)")
+
 
 # ---------- LÓGICA DA AGENDA ----------
 
@@ -597,6 +641,50 @@ def janela_agendar():
 
 # ----- CANCELAR HORÁRIO -----
 
+def cancelar_agendamento_em(data_iso, hora_inicio, parent=None):
+    garantir_dia_na_agenda(agenda, data_iso)
+
+    slot = agenda.get(data_iso, {}).get(hora_inicio)
+    if not isinstance(slot, dict):
+        messagebox.showinfo("Info", "Agendamento não encontrado.", parent=parent)
+        return
+
+    # garante que é o bloco inicial
+    inicio = slot.get("inicio", hora_inicio)
+    if inicio != hora_inicio:
+        hora_inicio = inicio
+        slot = agenda.get(data_iso, {}).get(hora_inicio)
+        if not isinstance(slot, dict):
+            messagebox.showinfo("Info", "Agendamento não encontrado.", parent=parent)
+            return
+
+    servico = slot.get("servico", "")
+    cliente = slot.get("cliente", "")
+    duracao = int(slot.get("duracao", 30))
+
+    resp = messagebox.askyesno(
+        "Confirmar",
+        f"Cancelar {servico} de {cliente} em {iso_para_br(data_iso)} às {hora_inicio}?",
+        parent=parent
+    )
+    if not resp:
+        return
+
+    blocos = duracao // INTERVALO
+    idx = HORARIOS.index(hora_inicio)
+    blocos_h = HORARIOS[idx: idx + blocos]
+
+    for h in blocos_h:
+        agenda[data_iso][h] = None
+
+    salvar_agenda(agenda)
+
+    # atualiza a tela principal pra essa data
+    data_var.set(iso_para_br(data_iso))
+    atualizar_campos_de_data()
+
+    messagebox.showinfo("Sucesso", "Agendamento cancelado ✅", parent=parent)
+
 def cancelar_horario():
     data_str = data_var.get().strip()
     data_iso = str_data_para_iso(data_str)
@@ -644,7 +732,202 @@ def cancelar_horario():
     atualizar_lista_agenda()
     messagebox.showinfo("Sucesso", "Horário cancelado com sucesso.")
 
+# ----- ADICIONAR PRODUTOS EM AGENDAMENTOS -----
+def adicionar_produto_em_agendamento(data_iso, hora_inicio, parent=None):
+    garantir_dia_na_agenda(agenda, data_iso)
+
+    slot = agenda.get(data_iso, {}).get(hora_inicio)
+    if not isinstance(slot, dict):
+        messagebox.showinfo("Info", "Agendamento não encontrado.", parent=parent)
+        return
+
+    # garante bloco inicial
+    inicio = slot.get("inicio", hora_inicio)
+    if inicio != hora_inicio:
+        hora_inicio = inicio
+        slot = agenda.get(data_iso, {}).get(hora_inicio)
+        if not isinstance(slot, dict):
+            messagebox.showinfo("Info", "Agendamento não encontrado.", parent=parent)
+            return
+
+    win = tk.Toplevel(parent if parent else root)
+    win.title("Adicionar produto ao atendimento")
+    win.geometry("380x260")
+
+    tk.Label(win, text=f"{slot.get('cliente','')} - {iso_para_br(data_iso)} {hora_inicio}", font=("Arial", 10, "bold")).pack(pady=5)
+
+    # lista só de produtos (tudo que NÃO é serviço)
+    produtos = [k for k in PRECO_SERVICOS.keys() if k not in SERVICOS]
+    produtos.sort()
+
+    tk.Label(win, text="Produto:").pack()
+    prod_var = tk.StringVar(value=produtos[0] if produtos else "")
+    combo_prod = ttk.Combobox(win, textvariable=prod_var, values=produtos, state="readonly")
+    combo_prod.pack(pady=5, fill=tk.X, padx=20)
+
+    tk.Label(win, text="Quantidade:").pack()
+    qtd_var = tk.StringVar(value="1")
+    entry_qtd = tk.Entry(win, textvariable=qtd_var, width=6, justify="center")
+    entry_qtd.pack(pady=5)
+
+    tk.Label(win, text="Obs (opcional):").pack()
+    obs_var = tk.StringVar(value="")
+    entry_obs = tk.Entry(win, textvariable=obs_var)
+    entry_obs.pack(pady=5, fill=tk.X, padx=20)
+
+    def salvar_extra():
+        produto = prod_var.get().strip()
+        if not produto:
+            messagebox.showerror("Erro", "Selecione um produto.", parent=win)
+            return
+
+        try:
+            qtd = int(qtd_var.get())
+            if qtd <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Erro", "Quantidade inválida.", parent=win)
+            return
+
+        valor_unit = float(PRECO_SERVICOS.get(produto, 0.0))
+        valor_total = valor_unit * qtd
+        obs = obs_var.get().strip()
+
+        extra = {"nome": produto, "valor": valor_total, "qtd": qtd}
+        if obs:
+            extra["obs"] = obs
+
+        slot.setdefault("extras", [])
+        slot["extras"].append(extra)
+
+        # aplica o mesmo extras em todos os blocos daquele atendimento
+        duracao = int(slot.get("duracao", 30))
+        blocos = duracao // INTERVALO
+        idx = HORARIOS.index(hora_inicio)
+        blocos_h = HORARIOS[idx: idx + blocos]
+        for h in blocos_h:
+            if isinstance(agenda[data_iso].get(h), dict):
+                agenda[data_iso][h]["extras"] = slot["extras"]
+
+        salvar_agenda(agenda)
+        data_var.set(iso_para_br(data_iso))
+        atualizar_campos_de_data()
+        messagebox.showinfo("Sucesso", f"Produto adicionado ✅ (R$ {valor_total:.2f})", parent=win)
+        win.destroy()
+
+    tk.Button(win, text="➕ Adicionar", command=salvar_extra).pack(pady=10)
+
 # ----- EDITAR AGENDAMENTO (AGORA PODE MUDAR DE DIA E TROCAR) -----
+
+def janela_editar_agendamento_em(data_iso, hora_inicio):
+    """Abre edição de um agendamento específico (data ISO e hora inicial)."""
+    garantir_dia_na_agenda(agenda, data_iso)
+
+    slot = agenda.get(data_iso, {}).get(hora_inicio)
+    if not isinstance(slot, dict):
+        messagebox.showinfo("Info", "Agendamento não encontrado.")
+        return
+
+    # garante que é o bloco inicial
+    inicio = slot.get("inicio", hora_inicio)
+    if inicio != hora_inicio:
+        hora_inicio = inicio
+        slot = agenda.get(data_iso, {}).get(hora_inicio)
+
+    cliente = slot.get("cliente", "")
+    servico = slot.get("servico", "")
+    obs = slot.get("obs", "")
+    inicio = slot.get("inicio", hora_inicio)
+
+    pacote_flag = slot.get("pacote", False)
+    pacote_nome = slot.get("pacote_nome")
+    pacote_valor = slot.get("pacote_valor_mensal", 0.0)
+
+    extras_orig = slot.get("extras", [])
+    pago_original = bool(slot.get("pago", False))
+
+    edit = tk.Toplevel(root)
+    edit.title("Editar agendamento")
+    edit.geometry("360x360")
+
+    tk.Label(edit, text=f"Data: {iso_para_br(data_iso)}", font=("Arial", 10, "bold")).pack(pady=3)
+    tk.Label(edit, text=f"Cliente: {cliente}", font=("Arial", 11, "bold")).pack(pady=5)
+
+    # Serviço
+    tk.Label(edit, text="Serviço:").pack()
+    servico_var = tk.StringVar(value=servico)
+    for s in SERVICOS.keys():
+        tk.Radiobutton(edit, text=s, variable=servico_var, value=s).pack(anchor="w")
+
+    # Horário inicial
+    tk.Label(edit, text="Novo horário inicial:").pack(pady=(10, 0))
+    horario_var = tk.StringVar(value=inicio)
+    combo_horario = ttk.Combobox(edit, textvariable=horario_var, values=HORARIOS, state="readonly")
+    combo_horario.pack(pady=5)
+
+    # Observações
+    tk.Label(edit, text="Observações (opcional):").pack()
+    obs_entry = tk.Entry(edit)
+    obs_entry.insert(0, obs)
+    obs_entry.pack(pady=5, fill=tk.X, padx=20)
+
+    def salvar_edicao():
+        novo_servico = servico_var.get()
+        nova_obs = obs_entry.get().strip()
+        novo_inicio = horario_var.get()
+
+        nova_duracao = SERVICOS[novo_servico]
+        blocos = nova_duracao // INTERVALO
+        idx = HORARIOS.index(novo_inicio)
+
+        if idx + blocos - 1 >= len(HORARIOS):
+            messagebox.showerror("Erro", "Esse serviço não cabe até o fim do expediente.", parent=edit)
+            return
+
+        novos_blocos = HORARIOS[idx: idx + blocos]
+
+        # checar disponibilidade (permitindo usar os próprios blocos antigos)
+        dur_ant = slot.get("duracao", SERVICOS.get(servico, 30))
+        idx_ant = HORARIOS.index(inicio)
+        blocos_antigos = HORARIOS[idx_ant: idx_ant + (dur_ant // INTERVALO)]
+
+        for h in novos_blocos:
+            ocup = agenda[data_iso].get(h)
+            if ocup is not None and h not in blocos_antigos:
+                messagebox.showerror("Erro", "Um ou mais horários já estão ocupados.", parent=edit)
+                return
+
+        # liberar antigos
+        for h in blocos_antigos:
+            agenda[data_iso][h] = None
+
+        # aplicar novos
+        preco_novo = PRECO_SERVICOS.get(novo_servico, 0.0)
+        for h in novos_blocos:
+            agenda[data_iso][h] = {
+                "cliente": cliente,
+                "servico": novo_servico,
+                "duracao": nova_duracao,
+                "obs": nova_obs,
+                "inicio": novo_inicio,
+                "preco": preco_novo,
+                "pago": pago_original,
+                "extras": extras_orig,
+                "pacote": pacote_flag,
+                "pacote_nome": pacote_nome,
+                "pacote_valor_mensal": pacote_valor,
+            }
+
+        salvar_agenda(agenda)
+
+        # atualiza a tela principal para a data editada
+        data_var.set(iso_para_br(data_iso))
+        atualizar_campos_de_data()
+
+        messagebox.showinfo("Sucesso", "Agendamento alterado!", parent=edit)
+        edit.destroy()
+
+    tk.Button(edit, text="💾 Salvar alterações", command=salvar_edicao).pack(pady=15)
 
 def janela_editar_agendamento():
     """Abre uma tela para editar o agendamento selecionado (qualquer dia)."""
@@ -971,7 +1254,26 @@ def ver_detalhes_agendamento(event):
     if obs:
         msg += f"\nObservações: {obs}"
 
-    messagebox.showinfo("Detalhes do agendamento", msg)
+    win = tk.Toplevel(root)
+    win.title("Detalhes do agendamento")
+    win.geometry("380x240")
+
+    tk.Label(win, text=msg, justify="left").pack(padx=10, pady=10, anchor="w")
+
+    btns = tk.Frame(win)
+    btns.pack(pady=10)
+
+    tk.Button(
+        btns,
+        text="📲 WhatsApp confirmar",
+        command=lambda: whatsapp_confirmar_agendamento(cliente, data_iso, inicio)
+    ).pack(side=tk.LEFT, padx=5)
+
+    tk.Button(
+        btns,
+        text="Fechar",
+        command=win.destroy
+    ).pack(side=tk.LEFT, padx=5)
 
 lista_horarios.bind("<Double-Button-1>", ver_detalhes_agendamento)
 
@@ -1138,11 +1440,11 @@ def registrar_venda_avulsa():
 
         cliente = cliente_var.get().strip()
         venda = {
-            "cliente": cliente,
+            "cliente": cliente if cliente else "",
             "produto": produto,
             "valor": valor,
             "pago": bool(pago_var.get()),
-        }
+                }
 
         vendas = agenda[data_iso].setdefault("_vendas_avulsas", [])
         vendas.append(venda)
@@ -1973,37 +2275,39 @@ def janela_buscar_cliente():
 
     win = tk.Toplevel(root)
     win.title("Buscar agendamentos por cliente")
-    win.geometry("520x420")
+    win.geometry("720x460")
 
-    tk.Label(
-        win,
-        text="Buscar agendamentos por cliente",
-        font=("Arial", 12, "bold"),
-    ).pack(pady=5)
+    tk.Label(win, text="Buscar agendamentos por cliente", font=("Arial", 12, "bold")).pack(pady=5)
 
-    # seleção do cliente
     tk.Label(win, text="Cliente:").pack()
     nomes_clientes = sorted(clientes.keys())
     nome_var = tk.StringVar()
-    combo_nome = ttk.Combobox(
-        win, textvariable=nome_var, values=nomes_clientes, state="readonly"
-    )
+    combo_nome = ttk.Combobox(win, textvariable=nome_var, values=nomes_clientes, state="readonly")
     combo_nome.pack(pady=5)
 
-    # lista de resultados
-    frame_lista_res = tk.Frame(win)
-    frame_lista_res.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    frame = tk.Frame(win)
+    frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-    lista_res = tk.Listbox(frame_lista_res, height=15, width=70)
+    lista_res = tk.Listbox(frame, height=16, width=95)
     lista_res.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-    scroll_res = tk.Scrollbar(frame_lista_res, command=lista_res.yview)
+    scroll_res = tk.Scrollbar(frame, command=lista_res.yview)
     scroll_res.pack(side=tk.RIGHT, fill=tk.Y)
     lista_res.config(yscrollcommand=scroll_res.set)
 
+    # guardamos objetos com info do item clicado
+    mapa_itens = []  # cada item: dict com tipo, data_iso, hora, etc.
+
+    info_var = tk.StringVar(value="Selecione um item para ver detalhes.")
+    lbl_info = tk.Label(win, textvariable=info_var, justify="left", font=("Arial", 9), fg="gray")
+    lbl_info.pack(pady=(0, 5), padx=10, anchor="w")
+
     def buscar():
+        nonlocal mapa_itens
         nome = nome_var.get().strip()
         lista_res.delete(0, tk.END)
+        mapa_itens.clear()
+        info_var.set("Selecione um item para ver detalhes.")
 
         if not nome:
             messagebox.showerror("Erro", "Selecione um cliente.", parent=win)
@@ -2011,37 +2315,215 @@ def janela_buscar_cliente():
 
         resultados = []
 
-        # varre TODA a agenda (todas as datas / horários)
         for data_iso, dia in agenda.items():
+            if not isinstance(dia, dict):
+                continue
+
+            # Agendamentos
             for hora, slot in dia.items():
-                if slot and slot.get("cliente") == nome:
-                    resultados.append(
-                        (
-                            data_iso,
-                            hora,
-                            slot.get("servico", ""),
-                            slot.get("obs", ""),
-                        )
-                    )
+                if isinstance(hora, str) and hora.startswith("_"):
+                    continue
+                if not isinstance(slot, dict):
+                    continue
+                if slot.get("inicio") != hora:
+                    continue
+
+                if slot.get("cliente") == nome:
+                    resultados.append({
+                        "tipo": "AGENDAMENTO",
+                        "data_iso": data_iso,
+                        "hora": hora,
+                        "servico": slot.get("servico", ""),
+                        "obs": slot.get("obs", ""),
+                        "pago": bool(slot.get("pago", False)),
+                        "total": float(slot.get("preco", PRECO_SERVICOS.get(slot.get("servico",""), 0.0))) +
+                                 sum(float(e.get("valor", 0.0)) for e in slot.get("extras", [])),
+                        "pacote": bool(slot.get("pacote", False)),
+                        "pacote_nome": slot.get("pacote_nome"),
+                        "extras": slot.get("extras", []),
+                    })
+
+            # Vendas avulsas (se tiver cliente preenchido)
+            vendas = dia.get("_vendas_avulsas", [])
+            if isinstance(vendas, list):
+                for idx, v in enumerate(vendas):
+                    if not isinstance(v, dict):
+                        continue
+                    if v.get("cliente", "").strip() == nome:
+                        resultados.append({
+                            "tipo": "VENDA",
+                            "data_iso": data_iso,
+                            "indice": idx,
+                            "produto": v.get("produto", ""),
+                            "valor": float(v.get("valor", 0.0)),
+                            "pago": bool(v.get("pago", True)),
+                        })
 
         if not resultados:
-            lista_res.insert(
-                tk.END,
-                "Nenhum agendamento encontrado para esse cliente.",
-            )
+            lista_res.insert(tk.END, "Nenhum registro encontrado para esse cliente.")
             return
 
-        # ordena por data + hora
-        resultados.sort(key=lambda t: (t[0], t[1]))
+        # ordena por data/hora (venda vai com hora '--' no display)
+        def chave_ord(r):
+            h = r.get("hora", "--")
+            return (r["data_iso"], h)
+        resultados.sort(key=chave_ord)
 
-        for data_iso, hora, servico, obs in resultados:
-            data_br = iso_para_br(data_iso)
-            linha = f"{data_br} - {hora} - {servico}"
-            if obs:
-                linha += f" ({obs})"
+        for r in resultados:
+            data_br = iso_para_br(r["data_iso"])
+            if r["tipo"] == "AGENDAMENTO":
+                hora = r["hora"]
+                serv = r.get("servico", "")
+                tag_pac = " (PACOTE)" if r.get("pacote") else ""
+                status = "Pago" if r.get("pago") else "Pendente"
+                linha = f"{data_br} - {hora} - {serv}{tag_pac} - R$ {r.get('total',0.0):.2f} - {status} [AG]"
+            else:
+                prod = r.get("produto", "")
+                status = "Pago" if r.get("pago") else "Pendente"
+                linha = f"{data_br} - -- - (Venda) {prod} - R$ {r.get('valor',0.0):.2f} - {status} [VD]"
+
             lista_res.insert(tk.END, linha)
+            mapa_itens.append(r)
 
-    tk.Button(win, text="🔍 Buscar", command=buscar).pack(pady=5)
+    def item_selecionado(event=None):
+        if not lista_res.curselection():
+            return
+        idx = lista_res.curselection()[0]
+        if idx < 0 or idx >= len(mapa_itens):
+            return
+
+        r = mapa_itens[idx]
+        data_br = iso_para_br(r["data_iso"])
+
+        if r["tipo"] == "AGENDAMENTO":
+            extras = r.get("extras", [])
+            extras_txt = ", ".join(f"{e.get('nome','')} (R$ {float(e.get('valor',0.0)):.2f})" for e in extras) if extras else "Nenhum"
+            pacote_txt = f"Sim ({r.get('pacote_nome')})" if r.get("pacote") else "Não"
+            status = "Pago" if r.get("pago") else "Pendente"
+
+            info_var.set(
+                f"📅 {data_br} às {r.get('hora')}\n"
+                f"✂️ Serviço: {r.get('servico')}\n"
+                f"📦 Pacote: {pacote_txt}\n"
+                f"🧴 Extras: {extras_txt}\n"
+                f"💰 Total: R$ {r.get('total',0.0):.2f} | Status: {status}"
+            )
+        else:
+            status = "Pago" if r.get("pago") else "Pendente"
+            info_var.set(
+                f"🛒 Venda avulsa em {data_br}\n"
+                f"📦 Produto: {r.get('produto')}\n"
+                f"💰 Valor: R$ {r.get('valor',0.0):.2f} | Status: {status}"
+            )
+
+    lista_res.bind("<<ListboxSelect>>", item_selecionado)
+
+    
+
+    def ir_para_data():
+        if not lista_res.curselection():
+            messagebox.showinfo("Info", "Selecione um item.", parent=win)
+            return
+        idx = lista_res.curselection()[0]
+        r = mapa_itens[idx]
+        data_var.set(iso_para_br(r["data_iso"]))
+        atualizar_campos_de_data()
+        win.lift()
+
+    def on_duplo_click(event=None):
+        ir_para_data()
+
+    lista_res.bind("<Double-Button-1>", on_duplo_click)
+
+    def editar_selecionado():
+        if not lista_res.curselection():
+            messagebox.showinfo("Info", "Selecione um item.", parent=win)
+            return
+        idx = lista_res.curselection()[0]
+        r = mapa_itens[idx]
+        if r["tipo"] != "AGENDAMENTO":
+            messagebox.showinfo("Info", "Somente agendamentos podem ser editados aqui.", parent=win)
+            return
+        janela_editar_agendamento_em(r["data_iso"], r["hora"])
+
+    def abrir_caixa_data():
+        if not lista_res.curselection():
+            messagebox.showinfo("Info", "Selecione um item.", parent=win)
+            return
+        idx = lista_res.curselection()[0]
+        r = mapa_itens[idx]
+        data_var.set(iso_para_br(r["data_iso"]))
+        atualizar_campos_de_data()
+        abrir_caixa_dia()
+
+    def marcar_venda_paga():
+        if not lista_res.curselection():
+            messagebox.showinfo("Info", "Selecione um item.", parent=win)
+            return
+        idx = lista_res.curselection()[0]
+        if idx < 0 or idx >= len(mapa_itens):
+            return
+        r = mapa_itens[idx]
+        if r.get("tipo") != "VENDA":
+            messagebox.showinfo("Info", "Selecione uma VENDA avulsa.", parent=win)
+            return
+
+        dia = agenda.get(r["data_iso"], {})
+        vendas = dia.get("_vendas_avulsas", [])
+        i = r.get("indice")
+        if not isinstance(vendas, list) or i is None or not (0 <= i < len(vendas)):
+            messagebox.showerror("Erro", "Venda não encontrada.", parent=win)
+            return
+
+        if bool(vendas[i].get("pago", True)):
+            messagebox.showinfo("Info", "Essa venda já está como paga.", parent=win)
+            return
+
+        vendas[i]["pago"] = True
+        salvar_agenda(agenda)
+        buscar()
+        info_var.set("Venda marcada como paga ✅")
+
+    # ----- botões deluxe -----
+    btns = tk.Frame(win)
+    btns.pack(pady=5)
+
+    def cancelar_selecionado():
+        if not lista_res.curselection():
+            messagebox.showinfo("Info", "Selecione um item.", parent=win)
+            return
+        idx = lista_res.curselection()[0]
+        if idx < 0 or idx >= len(mapa_itens):
+            return
+        r = mapa_itens[idx]
+        if r.get("tipo") != "AGENDAMENTO":
+            messagebox.showinfo("Info", "Selecione um AGENDAMENTO para cancelar.", parent=win)
+            return
+        cancelar_agendamento_em(r["data_iso"], r.get("hora"), parent=win)
+        buscar()
+
+    def adicionar_produto_selecionado():
+        if not lista_res.curselection():
+            messagebox.showinfo("Info", "Selecione um item.", parent=win)
+            return
+        idx = lista_res.curselection()[0]
+        if idx < 0 or idx >= len(mapa_itens):
+            return
+        r = mapa_itens[idx]
+        if r.get("tipo") != "AGENDAMENTO":
+            messagebox.showinfo("Info", "Selecione um AGENDAMENTO para adicionar produto.", parent=win)
+            return
+        adicionar_produto_em_agendamento(r["data_iso"], r.get("hora"), parent=win)
+        buscar()
+
+    tk.Button(btns, text="🔍 Buscar", command=buscar, width=14).grid(row=0, column=0, padx=5, pady=3)
+    tk.Button(btns, text="📅 Ir para data", command=ir_para_data, width=14).grid(row=0, column=1, padx=5, pady=3)
+    tk.Button(btns, text="✏️ Editar", command=editar_selecionado, width=14).grid(row=0, column=2, padx=5, pady=3)
+    tk.Button(btns, text="💰 Caixa do dia", command=abrir_caixa_data, width=14).grid(row=0, column=3, padx=5, pady=3)
+
+    tk.Button(btns, text="❌ Cancelar", command=cancelar_selecionado, width=14).grid(row=1, column=1, padx=5, pady=3)
+    tk.Button(btns, text="🧴 Add produto", command=adicionar_produto_selecionado, width=14).grid(row=1, column=2, padx=5, pady=3)
+    tk.Button(btns, text="✅ Pagar venda", command=marcar_venda_paga, width=14).grid(row=1, column=3, padx=5, pady=3)
 
 # ----- BOTÕES INFERIORES -----
 
@@ -2087,14 +2569,6 @@ btn_buscar = tk.Button(
     command=janela_buscar_cliente,
 )
 btn_buscar.grid(row=2, column=1, columnspan=2, pady=5)
-
-btn_caixa = tk.Button(
-    frame_botoes,
-    text="💰 Caixa do dia",
-    width=20,
-    command=abrir_caixa_dia,
-)
-btn_caixa.grid(row=3, column=0, padx=5, pady=5)
 
 btn_caixa = tk.Button(
     frame_botoes,

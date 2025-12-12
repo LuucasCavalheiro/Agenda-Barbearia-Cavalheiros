@@ -502,19 +502,7 @@
     "19:00": null,
     "19:30": null,
     "20:00": null,
-    "20:30": {
-      "cliente": "Lucas Cavalheiro2",
-      "servico": "Barba",
-      "duracao": 30,
-      "obs": "",
-      "inicio": "20:30",
-      "preco": 40.0,
-      "pago": false,
-      "extras": [],
-      "pacote": false,
-      "pacote_nome": null,
-      "pacote_valor_mensal": 0.0
-    }
+    "20:30": null
   },
   "2025-12-19": {
     "09:00": null,
