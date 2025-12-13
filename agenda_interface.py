@@ -226,7 +226,7 @@ clientes = carregar_clientes()
 
 root = tk.Tk()
 root.title("Agenda - Barbearia Cavalheiros")
-root.geometry("510x600")
+root.geometry("540x650")
 
 # ----- TOPO: DATA + BOTÕES -----
 
@@ -306,18 +306,42 @@ label_aniver.pack(pady=(0, 5))
 
 # ----- LISTA DA AGENDA DO DIA -----
 
-frame_lista = tk.Frame(root)
-frame_lista.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+# ----- ÁREA PRINCIPAL: AGENDA (ESQ) + STATUS (DIR) -----
+
+frame_principal = tk.Frame(root)
+frame_principal.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+# --- esquerda: lista da agenda ---
+frame_lista = tk.Frame(frame_principal)
+frame_lista.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
 label_dia = tk.Label(frame_lista, text="", font=("Arial", 12, "bold"))
 label_dia.pack(pady=5)
 
-lista_horarios = tk.Listbox(frame_lista, height=12, width=70)
+lista_horarios = tk.Listbox(frame_lista, height=12, width=55)
 lista_horarios.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
 scroll = tk.Scrollbar(frame_lista, command=lista_horarios.yview)
 scroll.pack(side=tk.RIGHT, fill=tk.Y)
 lista_horarios.config(yscrollcommand=scroll.set)
+
+# --- direita: botões de status ---
+frame_status = tk.Frame(frame_principal)
+frame_status.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+
+tk.Label(frame_status, text="Status", font=("Arial", 10, "bold")).pack(pady=(0, 10))
+
+tk.Button(frame_status, text="✅ Confirmado",
+          width=16, command=lambda: alterar_status_agendamento("confirmado")).pack(pady=4)
+
+tk.Button(frame_status, text="⏳ Pendente",
+          width=16, command=lambda: alterar_status_agendamento("pendente")).pack(pady=4)
+
+tk.Button(frame_status, text="🔁 Remarcar",
+          width=16, command=lambda: alterar_status_agendamento("remarcar")).pack(pady=4)
+
+tk.Button(frame_status, text="❌ Cancelado",
+          width=16, command=lambda: alterar_status_agendamento("cancelado")).pack(pady=4)
 
 # ----- FUNÇÕES DE ATUALIZAÇÃO DA TELA -----
 
@@ -422,7 +446,7 @@ def atualizar_lista_agenda():
         return
 
     garantir_dia_na_agenda(agenda, data_iso)
-    salvar_agenda(agenda)
+    dia = agenda.setdefault(data_iso, {h: None for h in HORARIOS})
 
     atualizar_dia_semana()
     atualizar_aviso_aniversario()
@@ -432,12 +456,55 @@ def atualizar_lista_agenda():
     label_dia.config(text=f"Agenda do dia {iso_para_br(data_iso)}")
 
     for h in HORARIOS:
-        slot = agenda[data_iso].get(h)
+        slot = dia.get(h)
+
         if slot is None:
             texto = f"{h} - LIVRE"
         else:
-            texto = f"{h} - {slot['cliente']} ({slot['servico']})"
+            status = slot.get("status", "pendente")
+            icone = {
+                "pendente": "⏳",
+                "confirmado": "✅",
+                "remarcar": "🔁",
+                "cancelado": "❌"
+            }.get(status, "⏳")
+
+            texto = f"{h} - {icone} {slot.get('cliente','')} ({slot.get('servico','')})"
+
         lista_horarios.insert(tk.END, texto)
+
+    salvar_agenda(agenda)
+
+def alterar_status_agendamento(novo_status):
+    data_str = data_var.get().strip()
+    data_iso = str_data_para_iso(data_str)
+    if not data_iso:
+        return
+
+    selecao = lista_horarios.curselection()
+    if not selecao:
+        messagebox.showinfo("Info", "Selecione um horário.")
+        return
+
+    linha = lista_horarios.get(selecao[0])
+    hora = linha.split(" - ")[0]
+
+    slot = agenda.get(data_iso, {}).get(hora)
+    if not slot:
+        return
+
+    inicio = slot.get("inicio", hora)
+    duracao = slot.get("duracao", 30)
+    blocos = duracao // INTERVALO
+    idx = HORARIOS.index(inicio)
+    blocos_h = HORARIOS[idx: idx + blocos]
+
+    for h in blocos_h:
+        if agenda[data_iso].get(h):
+            agenda[data_iso][h]["status"] = novo_status
+
+    salvar_agenda(agenda)
+    atualizar_lista_agenda()
 
 # ----- JANELA DE NOVO AGENDAMENTO -----
 
@@ -645,9 +712,10 @@ def janela_agendar():
             "preco": preco,
             "pago": False,
             "extras": [],
-            "pacote": False,            # 👈 normal é NÃO ser pacote
+            "pacote": False,            
             "pacote_nome": None,
             "pacote_valor_mensal": 0.0,
+            "status": "pendente",
     }
             
 
@@ -2548,6 +2616,8 @@ def janela_buscar_cliente():
 
 frame_botoes = tk.Frame(root)
 frame_botoes.pack(pady=10)
+frame_botoes.grid_columnconfigure(0, weight=1)
+frame_botoes.grid_columnconfigure(1, weight=1)
 
 btn_ver = tk.Button(
     frame_botoes, text="📅 Ver agenda do dia",
@@ -2628,6 +2698,8 @@ btn_pacote = tk.Button(
     command=janela_pacote_cliente,
 )
 btn_pacote.grid(row=5, column=0, padx=5, pady=5)
+
+
 
 # ----- INICIALIZAÇÃO -----
 
