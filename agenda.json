@@ -466,7 +466,8 @@
       "extras": [],
       "pacote": false,
       "pacote_nome": null,
-      "pacote_valor_mensal": 0.0
+      "pacote_valor_mensal": 0.0,
+      "status": "confirmado"
     },
     "09:30": null,
     "10:00": null,
@@ -2778,7 +2779,8 @@
       "extras": [],
       "pacote": true,
       "pacote_nome": "Pacote Mensal 170",
-      "pacote_valor_mensal": 170.0
+      "pacote_valor_mensal": 170.0,
+      "status": "confirmado"
     },
     "09:30": null,
     "10:00": null,
@@ -2810,7 +2812,8 @@
       "extras": [],
       "pacote": true,
       "pacote_nome": "Pacote Mensal 170",
-      "pacote_valor_mensal": 170.0
+      "pacote_valor_mensal": 170.0,
+      "status": "confirmado"
     },
     "19:30": null,
     "20:00": null,
@@ -5991,6 +5994,32 @@
     "20:30": null
   },
   "2025-12-13": {
+    "09:00": null,
+    "09:30": null,
+    "10:00": null,
+    "10:30": null,
+    "11:00": null,
+    "11:30": null,
+    "12:00": null,
+    "12:30": null,
+    "13:00": null,
+    "13:30": null,
+    "14:00": null,
+    "14:30": null,
+    "15:00": null,
+    "15:30": null,
+    "16:00": null,
+    "16:30": null,
+    "17:00": null,
+    "17:30": null,
+    "18:00": null,
+    "18:30": null,
+    "19:00": null,
+    "19:30": null,
+    "20:00": null,
+    "20:30": null
+  },
+  "2025-12-14": {
     "09:00": null,
     "09:30": null,
     "10:00": null,
